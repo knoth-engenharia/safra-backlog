@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Backlog Safra — Retirada de Equipamentos</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-top">
+      <div>
+        <h1>Backlog Safra</h1>
+        <p>Retirada de Equipamentos</p>
+      </div>
+      <div id="header-user" class="header-user hidden">
+        <span id="header-nome-tecnico"></span>
+        <button id="btn-logout" class="btn-logout">Sair</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== TELA DE LOGIN ===== -->
+  <div id="tela-login" class="tela-login">
+    <div class="login-card">
+      <div class="login-logo">🔧</div>
+      <h2 class="login-titulo">Acesso ao Sistema</h2>
+      <p class="login-subtitulo">Backlog Safra — EQS Engenharia</p>
+      <div id="login-erro" class="login-erro hidden">Usuário ou senha incorretos.</div>
+      <label class="login-label">Usuário</label>
+      <input type="text" id="login-usuario" class="login-input" placeholder="seu.usuario" autocomplete="username" />
+      <label class="login-label">Senha</label>
+      <input type="password" id="login-senha" class="login-input" placeholder="••••••" autocomplete="current-password" />
+      <button id="btn-entrar" class="btn-entrar">Entrar</button>
+    </div>
+  </div>
+
+  <!-- ===== APP PRINCIPAL ===== -->
+  <main class="container hidden" id="app-principal">
+
+    <section class="filters" id="filters">
+      <div class="search-wrapper">
+        <input type="text" id="search" class="input-search" placeholder="Buscar por nome, contrato ou endereço..." />
+        <button id="btn-limpar-busca" class="btn-limpar-busca hidden" aria-label="Limpar busca">✕</button>
+      </div>
+      <div class="filter-row">
+        <select id="filter-cidade" class="input-select"><option value="">Todas as cidades</option></select>
+        <select id="filter-bairro" class="input-select"><option value="">Todos os bairros</option></select>
+        <select id="filter-status" class="input-select">
+          <option value="">Todos os status</option>
+          <option value="Pendente">Pendente</option>
+          <option value="Retirado">Retirado</option>
+          <option value="Quebra">Quebra</option>
+        </select>
+        <select id="filter-tipo" class="input-select"><option value="">Todos os tipos</option></select>
+      </div>
+      <button id="btn-limpar-filtros" class="btn-limpar-filtros">Limpar filtros</button>
+    </section>
+
+    <p class="resultado-count" id="resultado-count">Carregando contratos...</p>
+    <section id="lista-contratos" class="lista-contratos"></section>
+    <div id="paginacao" class="paginacao hidden"></div>
+
+  </main>
+
+  <!-- ===== MODAL DE DETALHES ===== -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-content">
+      <button class="modal-fechar" id="modal-fechar">✕ Fechar</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL DE TUTORIAL ===== -->
+  <div id="modal-tutorial" class="modal hidden">
+    <div class="modal-content tutorial-content">
+      <div class="tutorial-header">
+        <span class="tutorial-contador">Passo <span id="tut-atual">1</span> de <span id="tut-total">1</span></span>
+        <button id="tutorial-fechar" class="tutorial-fechar-btn">✕</button>
+      </div>
+      <div class="tutorial-dots" id="tutorial-dots"></div>
+      <div id="tutorial-body" class="tutorial-body"></div>
+      <div class="tutorial-nav">
+        <button id="tut-prev" class="btn-tut-nav">← Anterior</button>
+        <button id="tut-next" class="btn-tut-nav btn-tut-next">Próximo →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== BOTÃO TUTORIAL (fixo) ===== -->
+  <button id="btn-tutorial" class="btn-tutorial" aria-label="Abrir tutorial">?</button>
+
+  <!-- ===== AVISO PÓS-SALVAMENTO ===== -->
+  <div id="aviso-evidencia" class="aviso-evidencia hidden">
+    <div class="aviso-icone">✅</div>
+    <div class="aviso-texto"><strong>Baixa registrada!</strong></div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
