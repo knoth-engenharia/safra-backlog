@@ -360,6 +360,17 @@ function atualizarBtnLocalizacao() {
   }
 }
 
+function atualizarProgressoGeocode(feito, total) {
+  const el = document.getElementById("geocode-progress");
+  if (!el) return;
+  if (feito >= total) {
+    el.classList.add("hidden");
+  } else {
+    el.textContent = `Calculando distâncias: ${feito}/${total}`;
+    el.classList.remove("hidden");
+  }
+}
+
 async function calcularDistanciasPagina(paginaContratos) {
   if (!userLocation || geocodificandoAtivo) return;
   geocodificandoAtivo = true;
@@ -367,13 +378,23 @@ async function calcularDistanciasPagina(paginaContratos) {
   const cache = lerCacheGeocode();
   const chavesProcessadas = new Set();
 
+  // Conta quantos precisam de requisição HTTP (não estão no cache)
+  const pendentes = paginaContratos.filter((c) => {
+    const novoEnd = extrairNovoEndereco(c.obs2);
+    const chave = enderecoParaChaveGeocode(novoEnd || c.endereco, c.cidade);
+    return !contratoDistancias.has(c.id) && !cache[chave];
+  });
+  let feito = 0;
+  const totalPendentes = pendentes.length;
+  if (totalPendentes > 0) atualizarProgressoGeocode(0, totalPendentes);
+
   for (const c of paginaContratos) {
     if (contratoDistancias.has(c.id)) continue;
     const novoEnd = extrairNovoEndereco(c.obs2);
     const end = novoEnd || c.endereco;
     const chave = enderecoParaChaveGeocode(end, c.cidade);
 
-    // Cache hit — instant
+    // Cache hit — instantâneo
     if (cache[chave]) {
       const { lat, lng } = cache[chave];
       contratoDistancias.set(
@@ -397,11 +418,14 @@ async function calcularDistanciasPagina(paginaContratos) {
         contratoDistancias.set(c.id, km);
         houveMudanca = true;
       }
+      feito++;
+      atualizarProgressoGeocode(feito, totalPendentes);
       await new Promise((r) => setTimeout(r, 1100)); // Nominatim: 1 req/s
     }
   }
 
   geocodificandoAtivo = false;
+  atualizarProgressoGeocode(totalPendentes, totalPendentes);
   if (houveMudanca) aplicarFiltros();
 }
 
@@ -1365,9 +1389,19 @@ function renderizarLista(lista) {
   renderizarPaginacao(totalPags, total);
   renderIcons();
 
-  // Inicia geocoding em background para os cartões desta página
   if (userLocation && !geocodificandoAtivo) {
-    setTimeout(() => calcularDistanciasPagina(pagina), 100);
+    const cidadeFiltrada = document.getElementById("filter-cidade")?.value;
+    if (cidadeFiltrada || ordenada.length <= 150) {
+      // Cidade filtrada ou lista pequena: geocodifica tudo
+      setTimeout(() => calcularDistanciasPagina(ordenada), 100);
+    } else {
+      // Lista grande sem filtro: só a página atual + avisa
+      setTimeout(() => calcularDistanciasPagina(pagina), 100);
+      mostrarToast(
+        "Filtre por cidade para calcular distâncias de todos os contratos.",
+        "aviso",
+      );
+    }
   }
 }
 
