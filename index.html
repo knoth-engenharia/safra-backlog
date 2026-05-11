@@ -130,15 +130,14 @@
             <option value="5km">Até 5km</option>
             <option value="10km">Até 10km</option>
           </select>
-          <button id="btn-localizacao" class="input-select btn-filtro-acao">
-            <i data-lucide="navigation" class="icon icon-sm"></i> Localização
-          </button>
-          <button id="btn-montar-rota" class="input-select btn-filtro-acao">
-            <i data-lucide="route" class="icon icon-sm"></i> Rota
-          </button>
-          <button id="btn-agrupar" class="input-select btn-filtro-acao">
-            <i data-lucide="layers" class="icon icon-sm"></i> Por rua
-          </button>
+          <button id="btn-localizacao" class="input-select btn-filtro-acao">Localização</button>
+          <button id="btn-montar-rota" class="input-select btn-filtro-acao">Rota</button>
+          <button id="btn-agrupar" class="input-select btn-filtro-acao">Por rua</button>
+          <select id="sort-rua" class="input-select hidden" onchange="alterarSortRua(this.value)">
+            <option value="az">A–Z</option>
+            <option value="mais">Mais contratos</option>
+            <option value="menos">Menos contratos</option>
+          </select>
         </div>
           <button id="btn-limpar-filtros" class="btn-limpar-filtros">
             Limpar filtros

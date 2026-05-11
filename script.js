@@ -304,13 +304,12 @@ function atualizarBtnLocalizacao() {
   if (!btn) return;
   btn.disabled = false;
   if (userLocation) {
-    btn.innerHTML = `LOCALIZAÇÃO ATIVA`;
+    btn.textContent = "Localização ativa";
     btn.classList.add("btn-loc-ativo");
   } else {
-    btn.innerHTML = `LOCALIZAÇÃO`;
+    btn.textContent = "Localização";
     btn.classList.remove("btn-loc-ativo");
   }
-  renderIcons();
 }
 
 async function calcularDistanciasPagina(paginaContratos) {
@@ -383,8 +382,7 @@ function toggleModoRota() {
   const btn = document.getElementById("btn-montar-rota");
   if (btn) {
     btn.classList.toggle("btn-acao-ativo", modoRota);
-    btn.innerHTML = modoRota ? `Cancelar rota` : `ROTA`;
-    renderIcons();
+    btn.textContent = modoRota ? "Cancelar rota" : "Rota";
   }
   if (modoRota)
     mostrarToast("Toque nos contratos para adicionar à rota.", "aviso");
@@ -463,6 +461,14 @@ function toggleAgrupamento() {
   modoAgrupamento = modoAgrupamento === "rua" ? "" : "rua";
   const btn = document.getElementById("btn-agrupar");
   if (btn) btn.classList.toggle("btn-acao-ativo", modoAgrupamento === "rua");
+  const sortSel = document.getElementById("sort-rua");
+  if (sortSel) sortSel.classList.toggle("hidden", modoAgrupamento !== "rua");
+  if (modoAgrupamento !== "rua") sortRua = "az";
+  aplicarFiltros();
+}
+
+function alterarSortRua(valor) {
+  sortRua = valor;
   aplicarFiltros();
 }
 
@@ -825,6 +831,7 @@ let rotaSelecionados = new Set(); // Set de contrato.id
 
 // Agrupamento
 let modoAgrupamento = ""; // "" | "rua"
+let sortRua = "az"; // "az" | "mais" | "menos"
 
 // =========================================
 // INICIALIZAÇÃO
@@ -1072,6 +1079,18 @@ function limparFiltros() {
   if (elPer) elPer.value = "";
   const elDist = document.getElementById("filter-distancia");
   if (elDist) elDist.value = "";
+  // Reseta agrupamento por rua
+  if (modoAgrupamento === "rua") {
+    modoAgrupamento = "";
+    sortRua = "az";
+    const btnAg = document.getElementById("btn-agrupar");
+    if (btnAg) btnAg.classList.remove("btn-acao-ativo");
+    const sortSel = document.getElementById("sort-rua");
+    if (sortSel) {
+      sortSel.value = "az";
+      sortSel.classList.add("hidden");
+    }
+  }
   atualizarBairros();
   atualizarBotaoLimparBusca();
   localStorage.removeItem(FILTROS_KEY);
@@ -1230,6 +1249,50 @@ function renderizarLista(lista) {
   }
 
   const total = ordenada.length;
+
+  // --- MODO AGRUPAMENTO POR RUA: agrupa lista inteira, sem paginação por contrato ---
+  if (modoAgrupamento === "rua") {
+    const grupos = {};
+    ordenada.forEach((c) => {
+      const novoEnd = extrairNovoEndereco(c.obs2);
+      const rua = extrairNomeRua(novoEnd || c.endereco);
+      if (!grupos[rua]) grupos[rua] = [];
+      grupos[rua].push(c);
+    });
+    let chaves = Object.keys(grupos);
+    if (sortRua === "mais") {
+      chaves.sort((a, b) => grupos[b].length - grupos[a].length);
+    } else if (sortRua === "menos") {
+      chaves.sort((a, b) => grupos[a].length - grupos[b].length);
+    } else {
+      chaves.sort();
+    }
+    contador.textContent = `${total} contrato(s) em ${chaves.length} rua(s)`;
+    let html = "";
+    chaves.forEach((rua) => {
+      html += `<div class="grupo-rua-header"><i data-lucide="map-pin" class="icon icon-sm"></i> ${rua} <span class="grupo-count">${grupos[rua].length}</span></div>`;
+      html += grupos[rua].map(criarCartaoHTML).join("");
+    });
+    container.innerHTML = html;
+    ordenada.forEach((c) => {
+      const el = document.getElementById(`cartao-${c.id}`);
+      if (!el) return;
+      if (modoRota) {
+        el.addEventListener("click", (e) => toggleSelecaoRota(c.id, e));
+        if (rotaSelecionados.has(c.id)) el.classList.add("cartao-na-rota");
+      } else {
+        el.addEventListener("click", () => abrirModal(c));
+      }
+    });
+    renderizarPaginacao(0, 0);
+    renderIcons();
+    if (userLocation && !geocodificandoAtivo) {
+      setTimeout(() => calcularDistanciasPagina(ordenada), 100);
+    }
+    return;
+  }
+
+  // --- MODO NORMAL: paginação por contrato ---
   const totalPags = Math.max(1, Math.ceil(total / POR_PAGINA));
   if (paginaAtual > totalPags) paginaAtual = totalPags;
 
@@ -1238,27 +1301,7 @@ function renderizarLista(lista) {
   const fim = Math.min(inicio + POR_PAGINA, total);
 
   contador.textContent = `${total} contrato(s) — exibindo ${inicio + 1}–${fim}`;
-
-  if (modoAgrupamento === "rua") {
-    // Agrupa por nome de rua
-    const grupos = {};
-    pagina.forEach((c) => {
-      const novoEnd = extrairNovoEndereco(c.obs2);
-      const rua = extrairNomeRua(novoEnd || c.endereco);
-      if (!grupos[rua]) grupos[rua] = [];
-      grupos[rua].push(c);
-    });
-    let html = "";
-    Object.keys(grupos)
-      .sort()
-      .forEach((rua) => {
-        html += `<div class="grupo-rua-header"><i data-lucide="map-pin" class="icon icon-sm"></i> ${rua} <span class="grupo-count">${grupos[rua].length}</span></div>`;
-        html += grupos[rua].map(criarCartaoHTML).join("");
-      });
-    container.innerHTML = html;
-  } else {
-    container.innerHTML = pagina.map(criarCartaoHTML).join("");
-  }
+  container.innerHTML = pagina.map(criarCartaoHTML).join("");
 
   pagina.forEach((c) => {
     const el = document.getElementById(`cartao-${c.id}`);
@@ -1898,6 +1941,33 @@ const TUTORIAL_PASSOS = [
             As fotos ficam salvas na nuvem e qualquer pessoa com acesso ao sistema pode ver.<br/><br/>
             Isso substitui o envio pelo grupo do WhatsApp.<br/><br/>
             💡 <em>Tire a foto do serial do equipamento, geolocalização e tentativa de contato.</em>`,
+  },
+  {
+    lucideIcon: "navigation",
+    titulo: "Localização e Distâncias",
+    texto: `O botão <strong>Localização</strong> nos filtros ativa o GPS do seu celular.<br/><br/>
+            Com a localização ativa, cada contrato exibe a distância até o endereço (ex: <em>1,2 km</em>), calculada em linha reta.<br/><br/>
+            Você também pode usar o filtro <strong>Distância</strong> para mostrar apenas contratos dentro de um raio (500m, 1km, 5km, 10km).<br/><br/>
+            💡 As distâncias são aproximadas — o trânsito real pode variar.`,
+  },
+  {
+    lucideIcon: "route",
+    titulo: "Modo Rota",
+    texto: `O botão <strong>Rota</strong> ativa um modo especial onde você seleciona os contratos que quer visitar em sequência.<br/><br/>
+            1. Toque em <strong>Rota</strong> nos filtros<br/>
+            2. Toque nos cartões dos contratos desejados (até 9 paradas)<br/>
+            3. Toque em <strong>Abrir no Maps</strong> na barra inferior para abrir a rota no Google Maps<br/><br/>
+            Para cancelar o modo rota, toque no <strong>X</strong> na barra inferior ou no botão <strong>Cancelar rota</strong>.`,
+  },
+  {
+    lucideIcon: "layers",
+    titulo: "Agrupar por Rua",
+    texto: `O botão <strong>Por rua</strong> reorganiza a lista agrupando todos os contratos de uma mesma rua juntos.<br/><br/>
+            Isso facilita planejar visitas numa mesma região sem precisar se deslocar várias vezes.<br/><br/>
+            Quando o agrupamento está ativo, aparece um seletor de <strong>Ordenação</strong>:<br/>
+            • <em>A–Z</em> — alfabética pelo nome da rua<br/>
+            • <em>Mais contratos</em> — ruas com mais trabalho primeiro<br/>
+            • <em>Menos contratos</em> — ruas com menos trabalho primeiro`,
   },
 ];
 
