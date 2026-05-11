@@ -1,0 +1,50 @@
+# =============================================
+# OS / Sistema
+# =============================================
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# =============================================
+# Editores
+# =============================================
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# =============================================
+# Node (caso ferramentas de build sejam adicionadas)
+# =============================================
+node_modules/
+npm-debug.log*
+yarn-error.log*
+dist/
+.cache/
+
+# =============================================
+# Variáveis de ambiente
+# =============================================
+.env
+.env.*
+!.env.example
+
+# =============================================
+# DADOS SENSÍVEIS — NÃO COMMITAR
+# =============================================
+# O gas/ contém o SPREADSHEET_ID da planilha privada.
+# Rastreie apenas o arquivo de exemplo abaixo.
+gas/Codigo.gs
+
+# Config local (se for separar chaves no futuro)
+config.local.js
+secrets.js
+
+# =============================================
+# Logs e temporários
+# =============================================
+*.log
+*.tmp
+*.bak
