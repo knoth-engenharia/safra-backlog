@@ -1,0 +1,21 @@
+{
+  "name": "Backlog Safra — EQS Engenharia",
+  "short_name": "Backlog Safra",
+  "description": "Retirada de equipamentos Claro — EQS Engenharia",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f0f2f5",
+  "theme_color": "#0056b3",
+  "orientation": "portrait-primary",
+  "lang": "pt-BR",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

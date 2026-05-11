@@ -1,9 +1,10 @@
 // =========================================
 // CONFIGURAÇÃO DA API
 // =========================================
-const SHEETDB_ID = "okh5hjwyagls3";
-const SHEETDB_URL = `https://sheetdb.io/api/v1/${SHEETDB_ID}?sheet=SAFRA`;
-const SHEETDB_AUTH_URL = `https://sheetdb.io/api/v1/${SHEETDB_ID}?sheet=TECNICOS`;
+// URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
+// Ver instruções em gas/Codigo.gs
+const GAS_URL =
+  "https://script.google.com/macros/s/AKfycbzquh9Z1HFtHvuSb_BpVN6O6nF6_JSmUx0ImDWBeJV4Pf9hArbZOrqZoyd38hp34vIa/exec";
 
 // Chave gratuita do ImgBB — obter em: https://api.imgbb.com
 // Criar conta, gerar chave API e colar aqui
@@ -16,6 +17,7 @@ const COL_TECNICO = "TECNICO_EXEC";
 const COL_FOTO = "FOTO_EXEC";
 const COL_BAIXA_SITE = "BAIXA_SITE";
 const COL_SERIAIS_RET = "SERIAIS_RETIRADOS";
+const COL_VISITAS = "VISITAS";
 
 const POR_PAGINA = 30;
 
@@ -46,13 +48,450 @@ function toTitleCase(str) {
 
 function parseDateBR(str) {
   if (!str) return 0;
-  const m = str.match(/(\d{2})\/(\d{2})\/(\d{4})[\s,]+(\d{2}):(\d{2})/);
+  const m = str.match(/(\d{2})\/(\d{2})\/(\d{4})(?:[\s,]+(\d{2}):(\d{2}))?/);
   if (!m) return 0;
-  return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]).getTime();
+  return new Date(
+    +m[3],
+    +m[2] - 1,
+    +m[1],
+    +(m[4] || 0),
+    +(m[5] || 0),
+  ).getTime();
+}
+
+// Normaliza qualquer formato de data (DD/MM/YYYY, ISO, JS toString) para exibição
+function formatarData(str, incluirHora = false) {
+  if (!str) return "";
+  // Já está em DD/MM/YYYY (com ou sem hora)
+  const brMatch = str.match(
+    /^(\d{2})\/(\d{2})\/(\d{4})(?:[,\s]+(\d{2}):(\d{2}))?/,
+  );
+  if (brMatch) {
+    const base = `${brMatch[1]}/${brMatch[2]}/${brMatch[3]}`;
+    if (incluirHora && brMatch[4] && brMatch[5])
+      return `${base} ${brMatch[4]}:${brMatch[5]}`;
+    return base;
+  }
+  // Qualquer outro formato (JS Date.toString, ISO, etc.)
+  try {
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return str;
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    if (incluirHora) {
+      const hh = String(d.getHours()).padStart(2, "0");
+      const min = String(d.getMinutes()).padStart(2, "0");
+      return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+    }
+    return `${dd}/${mm}/${yyyy}`;
+  } catch {
+    return str;
+  }
 }
 
 function renderIcons() {
   if (window.lucide) lucide.createIcons();
+}
+
+// ---- SLA ----
+function calcularDiasSLA(c) {
+  if (
+    c.status !== "Pendente" &&
+    c.status !== "Quebra" &&
+    c.status !== "Parcial"
+  )
+    return null;
+  const refStr = c.status === "Quebra" ? c.dataExec : c.dataPend;
+  if (!refStr) return null;
+  const m = refStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return null;
+  const ref = new Date(+m[3], +m[2] - 1, +m[1]);
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const dias = Math.floor((hoje - ref) / 86400000);
+  return dias >= 0 ? dias : null;
+}
+
+function criarBadgeSLA(c) {
+  const dias = calcularDiasSLA(c);
+  if (dias === null) return "";
+  const cls = dias > 14 ? "sla-critico" : dias > 7 ? "sla-aviso" : "sla-normal";
+  const ref = c.status === "Quebra" ? "quebra" : "pendência";
+  return `<span class="badge-sla ${cls}" title="${dias} dia(s) desde a ${ref}">⏱ ${dias}d</span>`;
+}
+
+// ---- Filtro de período (baseado em DATA_PEND) ----
+function filtrarPorPeriodo(c, periodo) {
+  if (!periodo) return true;
+  if (!c.dataPend) return false;
+  const m = c.dataPend.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return false;
+  const data = new Date(+m[3], +m[2] - 1, +m[1]);
+  const hoje = new Date();
+  if (periodo === "semana") {
+    const ini = new Date(hoje);
+    ini.setDate(hoje.getDate() - hoje.getDay());
+    ini.setHours(0, 0, 0, 0);
+    const fim = new Date(ini);
+    fim.setDate(ini.getDate() + 6);
+    fim.setHours(23, 59, 59, 999);
+    return data >= ini && data <= fim;
+  }
+  if (periodo === "mes") {
+    return (
+      data.getMonth() === hoje.getMonth() &&
+      data.getFullYear() === hoje.getFullYear()
+    );
+  }
+  if (periodo === "mes-anterior") {
+    const ma = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+    return (
+      data.getMonth() === ma.getMonth() &&
+      data.getFullYear() === ma.getFullYear()
+    );
+  }
+  return true;
+}
+
+// ---- Detector de duplicatas ----
+function detectarDuplicatas(contrato) {
+  const novoEnd = extrairNovoEndereco(contrato.obs2);
+  const endRef = (novoEnd || contrato.endereco || "").toLowerCase().trim();
+  const nomeRef = (contrato.nome || "").toLowerCase().trim();
+  return contratos.filter((c) => {
+    if (c.id === contrato.id) return false;
+    const ce = extrairNovoEndereco(c.obs2);
+    const endC = (ce || c.endereco || "").toLowerCase().trim();
+    const nomeC = (c.nome || "").toLowerCase().trim();
+    return (
+      (endRef.length > 5 && endC === endRef) ||
+      (nomeRef.length > 4 && nomeC === nomeRef && c.cidade === contrato.cidade)
+    );
+  });
+}
+
+function criarAlertaDuplicatasHTML(dups) {
+  if (!dups.length) return "";
+  const items = dups
+    .map((d) => {
+      const cls = statusParaClasse(d.status);
+      return `<li><span class="badge-status badge-${cls} badge-sm">${d.status}</span> <strong>${d.contrato}</strong> — ${d.bairro}</li>`;
+    })
+    .join("");
+  return `<div class="alerta-duplicata"><i data-lucide="alert-triangle" class="icon icon-sm"></i> <strong>Atenção:</strong> Mesmo cliente/endereço em outros contratos:<ul class="duplicata-lista">${items}</ul></div>`;
+}
+
+// ---- Tentativas de visita ----
+function criarVisitasHTML(visitas) {
+  if (!visitas?.trim()) return "";
+  const lista = visitas
+    .split("|")
+    .map((v) => v.trim())
+    .filter(Boolean);
+  if (!lista.length) return "";
+  const itens = lista
+    .map(
+      (v) =>
+        `<li class="visita-item"><i data-lucide="clock" class="icon icon-sm"></i> ${v}</li>`,
+    )
+    .join("");
+  return `<div class="detalhe-campo">
+    <span class="detalhe-label">Tentativas de visita (${lista.length})</span>
+    <ul class="visitas-lista">${itens}</ul>
+  </div>`;
+}
+
+// =========================================
+// GEOLOCALIZAÇÃO — distância até contratos
+// =========================================
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatarDistancia(km) {
+  if (km < 1) return `${Math.round(km * 1000)}m`;
+  return `${km.toFixed(1).replace(".", ",")} km`;
+}
+
+function lerCacheGeocode() {
+  try {
+    return JSON.parse(sessionStorage.getItem(GEOCODE_CACHE_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function salvarCacheGeocode(cache) {
+  try {
+    sessionStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(cache));
+  } catch {}
+}
+
+function enderecoParaChaveGeocode(endereco, cidade) {
+  // Remove house number to maximise cache hits across similar addresses
+  const rua = endereco
+    .replace(/,?\s*n[ºo°]?\s*\d+.*/i, "")
+    .replace(/,?\s*\d+\s*$/, "")
+    .trim();
+  return `${rua}, ${cidade}`.toLowerCase();
+}
+
+async function geocodificarEndereco(endereco, cidade) {
+  const cache = lerCacheGeocode();
+  const chave = enderecoParaChaveGeocode(endereco, cidade);
+  if (cache[chave]) return cache[chave];
+  try {
+    const query = encodeURIComponent(`${chave}, Brasil`);
+    const resp = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1&countrycodes=br`,
+      {
+        headers: {
+          "Accept-Language": "pt-BR,pt",
+          "User-Agent": "BacklogSafra/1.0 (internal)",
+        },
+      },
+    );
+    const json = await resp.json();
+    if (json.length > 0) {
+      const coords = {
+        lat: parseFloat(json[0].lat),
+        lng: parseFloat(json[0].lon),
+      };
+      cache[chave] = coords;
+      salvarCacheGeocode(cache);
+      return coords;
+    }
+  } catch {}
+  return null;
+}
+
+function ativarLocalizacao() {
+  if (!navigator.geolocation) {
+    mostrarToast("Geolocalização não suportada neste dispositivo.", "erro");
+    return;
+  }
+  const btn = document.getElementById("btn-localizacao");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Localizando...";
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      atualizarBtnLocalizacao();
+      mostrarToast("Localização ativa. Calculando distâncias...", "sucesso");
+      aplicarFiltros();
+    },
+    () => {
+      atualizarBtnLocalizacao();
+      mostrarToast("Não foi possível obter sua localização.", "erro");
+    },
+    { timeout: 10000, enableHighAccuracy: true },
+  );
+}
+
+function atualizarBtnLocalizacao() {
+  const btn = document.getElementById("btn-localizacao");
+  if (!btn) return;
+  btn.disabled = false;
+  if (userLocation) {
+    btn.innerHTML = `LOCALIZAÇÃO ATIVA`;
+    btn.classList.add("btn-loc-ativo");
+  } else {
+    btn.innerHTML = `LOCALIZAÇÃO`;
+    btn.classList.remove("btn-loc-ativo");
+  }
+  renderIcons();
+}
+
+async function calcularDistanciasPagina(paginaContratos) {
+  if (!userLocation || geocodificandoAtivo) return;
+  geocodificandoAtivo = true;
+  let houveMudanca = false;
+  const cache = lerCacheGeocode();
+  const chavesProcessadas = new Set();
+
+  for (const c of paginaContratos) {
+    if (contratoDistancias.has(c.id)) continue;
+    const novoEnd = extrairNovoEndereco(c.obs2);
+    const end = novoEnd || c.endereco;
+    const chave = enderecoParaChaveGeocode(end, c.cidade);
+
+    // Cache hit — instant
+    if (cache[chave]) {
+      const { lat, lng } = cache[chave];
+      contratoDistancias.set(
+        c.id,
+        haversineKm(userLocation.lat, userLocation.lng, lat, lng),
+      );
+      houveMudanca = true;
+      continue;
+    }
+
+    if (!chavesProcessadas.has(chave)) {
+      chavesProcessadas.add(chave);
+      const coords = await geocodificarEndereco(end, c.cidade);
+      if (coords) {
+        const km = haversineKm(
+          userLocation.lat,
+          userLocation.lng,
+          coords.lat,
+          coords.lng,
+        );
+        contratoDistancias.set(c.id, km);
+        houveMudanca = true;
+      }
+      await new Promise((r) => setTimeout(r, 1100)); // Nominatim: 1 req/s
+    }
+  }
+
+  geocodificandoAtivo = false;
+  if (houveMudanca) aplicarFiltros();
+}
+
+function criarBadgeDistancia(c) {
+  if (!userLocation) return "";
+  const km = contratoDistancias.get(c.id);
+  if (km === undefined)
+    return `<span class="badge-dist badge-dist-calc" title="Calculando...">…</span>`;
+  return `<span class="badge-dist" title="Distância estimada">${formatarDistancia(km)}</span>`;
+}
+
+function filtrarPorDistancia(c, distFiltro) {
+  if (!distFiltro || distFiltro === "mais-perto" || !userLocation) return true;
+  const km = contratoDistancias.get(c.id);
+  if (km === undefined) return true; // ainda não geocodificado — inclui por padrão
+  const limites = { "500m": 0.5, "1km": 1, "5km": 5, "10km": 10 };
+  return km <= (limites[distFiltro] ?? Infinity);
+}
+
+// =========================================
+// MONTAGEM DE ROTA
+// =========================================
+function toggleModoRota() {
+  modoRota = !modoRota;
+  if (!modoRota) rotaSelecionados.clear();
+  const btn = document.getElementById("btn-montar-rota");
+  if (btn) {
+    btn.classList.toggle("btn-acao-ativo", modoRota);
+    btn.innerHTML = modoRota ? `Cancelar rota` : `ROTA`;
+    renderIcons();
+  }
+  if (modoRota)
+    mostrarToast("Toque nos contratos para adicionar à rota.", "aviso");
+  atualizarBarraRota();
+  aplicarFiltros();
+}
+
+function toggleSelecaoRota(id, event) {
+  event.stopPropagation();
+  if (rotaSelecionados.has(id)) {
+    rotaSelecionados.delete(id);
+  } else {
+    if (rotaSelecionados.size >= 9) {
+      mostrarToast(
+        "Máximo de 9 paradas por rota (limite do Google Maps).",
+        "aviso",
+      );
+      return;
+    }
+    rotaSelecionados.add(id);
+  }
+  const el = document.getElementById(`cartao-${id}`);
+  if (el) {
+    el.classList.toggle("cartao-na-rota", rotaSelecionados.has(id));
+    // Atualiza o ícone do indicador
+    const ind = el.querySelector(".rota-indicador");
+    if (ind) {
+      ind.classList.toggle("rota-selecionado", rotaSelecionados.has(id));
+      ind.innerHTML = rotaSelecionados.has(id)
+        ? `<i data-lucide="check-circle" class="icon icon-sm"></i>`
+        : `<i data-lucide="circle" class="icon icon-sm"></i>`;
+      renderIcons();
+    }
+  }
+  atualizarBarraRota();
+}
+
+function atualizarBarraRota() {
+  const barra = document.getElementById("barra-rota");
+  if (!barra) return;
+  if (!modoRota) {
+    barra.classList.add("hidden");
+    return;
+  }
+  barra.classList.remove("hidden");
+  const n = rotaSelecionados.size;
+  const info =
+    n === 0
+      ? "Nenhum contrato selecionado"
+      : `${n} parada${n > 1 ? "s" : ""} na rota`;
+  barra.innerHTML = `
+    <span class="barra-rota-info">${info}</span>
+    <button class="btn-abrir-rota" onclick="abrirRotaMaps()" ${n < 1 ? "disabled" : ""}><i data-lucide="map" class="icon icon-sm"></i> Abrir no Maps</button>`;
+  renderIcons();
+}
+
+function abrirRotaMaps() {
+  const selecionados = contratos.filter((c) => rotaSelecionados.has(c.id));
+  if (!selecionados.length) return;
+  const enderecos = selecionados.map((c) => {
+    const novoEnd = extrairNovoEndereco(c.obs2);
+    return encodeURIComponent(`${novoEnd || c.endereco}, ${c.cidade}`);
+  });
+  const url =
+    enderecos.length === 1
+      ? `https://www.google.com/maps/search/?api=1&query=${enderecos[0]}`
+      : `https://www.google.com/maps/dir/${enderecos.join("/")}`;
+  window.open(url, "_blank");
+}
+
+// =========================================
+// AGRUPAMENTO POR RUA
+// =========================================
+function toggleAgrupamento() {
+  modoAgrupamento = modoAgrupamento === "rua" ? "" : "rua";
+  const btn = document.getElementById("btn-agrupar");
+  if (btn) btn.classList.toggle("btn-acao-ativo", modoAgrupamento === "rua");
+  aplicarFiltros();
+}
+
+function extrairNomeRua(endereco) {
+  if (!endereco) return "Sem endereço";
+  // Tudo antes do primeiro número de casa ou vírgula
+  const m = endereco.match(/^([^,\d]+)/);
+  return m ? m[1].trim() : endereco;
+}
+
+async function registrarTentativa() {
+  const btns = document.querySelectorAll("#acoes-modal .btn");
+  btns.forEach((b) => (b.disabled = true));
+  const data = formatarDataExec();
+  const visitasAnt = contratoAtivo.visitas || "";
+  const novas = visitasAnt ? `${visitasAnt}|${data}` : data;
+  try {
+    await salvarNaPlanilha(contratoAtivo, { [COL_VISITAS]: novas });
+    const idx = contratos.findIndex((c) => c.id === contratoAtivo.id);
+    if (idx !== -1) {
+      contratos[idx] = { ...contratos[idx], visitas: novas };
+      contratoAtivo = contratos[idx];
+    }
+    mostrarToast("Tentativa de visita registrada.", "sucesso");
+    abrirModal(contratoAtivo);
+  } catch (e) {
+    console.error("Erro ao registrar tentativa:", e);
+    mostrarToast("Erro ao salvar. Tente novamente.", "erro");
+    btns.forEach((b) => (b.disabled = false));
+  }
 }
 
 let _toastTimer = null;
@@ -62,10 +501,15 @@ function mostrarToast(msg, tipo = "sucesso") {
   clearTimeout(_toastTimer);
   el.innerHTML = msg;
   el.className = `toast toast-${tipo}`;
-  _toastTimer = setTimeout(() => {
-    el.classList.add("toast-saindo");
-    setTimeout(() => { el.className = "toast hidden"; }, 300);
-  }, tipo === "erro" ? 5000 : 3500);
+  _toastTimer = setTimeout(
+    () => {
+      el.classList.add("toast-saindo");
+      setTimeout(() => {
+        el.className = "toast hidden";
+      }, 300);
+    },
+    tipo === "erro" ? 5000 : 3500,
+  );
 }
 
 // =========================================
@@ -111,8 +555,9 @@ async function tentarLogin() {
   erro.classList.add("hidden");
 
   try {
-    const resp = await fetch(SHEETDB_AUTH_URL);
-    const lista = await resp.json();
+    const resp = await fetch(`${GAS_URL}?sheet=TECNICOS`);
+    const respJson = await resp.json();
+    const lista = respJson.data ?? [];
 
     const match = lista.find(
       (u) =>
@@ -165,7 +610,7 @@ function mapearContrato(linha, indice) {
     cidade: toTitleCase(linha["NM_CIDADE"]) || "—",
     bairro: toTitleCase(linha["BAIRRO"]) || "—",
     endereco: toTitleCase(linha["ENDEREÇO"]) || "—",
-    dataPend: linha["DATA_PEND"] || "",
+    dataPend: formatarData(linha["DATA_PEND"] || ""),
     baixaSite: linha[COL_BAIXA_SITE] || "",
     obs1: linha["OBS 1"] || "",
     obs2: linha["OBS 2"] || "",
@@ -180,12 +625,13 @@ function mapearContrato(linha, indice) {
     terminais: linha["TERMINAIS"] || "",
     tipoDesconexao: linha["DS_TIPO_DESCONEXAO"] || "",
     codigoOS: linha[COL_CODIGO_OS] || "",
-    dataExec: linha[COL_DATA_EXEC] || "",
+    dataExec: formatarData(linha[COL_DATA_EXEC] || "", true),
     obsExec: linha[COL_OBS_EXEC] || "",
     tecnicoExec: linha[COL_TECNICO] || "",
     fotoExec: linha[COL_FOTO] || "",
     seriaisRet: linha[COL_SERIAIS_RET] || "",
-    dataAgend: linha["DATA"] || "",
+    visitas: linha[COL_VISITAS] || "",
+    dataAgend: formatarData(linha["DATA"] || ""),
     horario: linha["HORARIO"] || "",
     tecnicoDesig: linha["TECNICO_DESIG"] || "",
     status: linha["STATUS"] || "Pendente",
@@ -196,14 +642,199 @@ function mapearContrato(linha, indice) {
 // =========================================
 // ESTADO DA APLICAÇÃO
 // =========================================
+// =========================================
+// MODO OFFLINE — IndexedDB + fila de baixas
+// =========================================
+class OfflineError extends Error {}
+
+const IDB_NAME = "backlog_safra_db";
+const IDB_VERSION = 1;
+
+function abrirIDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains("contratos_cache")) {
+        db.createObjectStore("contratos_cache", { keyPath: "chave" });
+      }
+      if (!db.objectStoreNames.contains("pending_baixas")) {
+        db.createObjectStore("pending_baixas", { autoIncrement: true });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function salvarContratosIDB(lista, usuario) {
+  try {
+    const db = await abrirIDB();
+    const tx = db.transaction("contratos_cache", "readwrite");
+    tx.objectStore("contratos_cache").put({
+      chave: `data_${usuario || "default"}`,
+      lista,
+      ts: Date.now(),
+    });
+  } catch {}
+}
+
+async function lerContratosIDB(usuario) {
+  try {
+    const db = await abrirIDB();
+    return new Promise((resolve) => {
+      const req = db
+        .transaction("contratos_cache")
+        .objectStore("contratos_cache")
+        .get(`data_${usuario || "default"}`);
+      req.onsuccess = () => resolve(req.result?.lista ?? null);
+      req.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function enfileirarBaixa(contratoId, campos) {
+  try {
+    const db = await abrirIDB();
+    const tx = db.transaction("pending_baixas", "readwrite");
+    tx.objectStore("pending_baixas").add({
+      contratoId,
+      campos,
+      ts: Date.now(),
+    });
+  } catch {}
+}
+
+async function contarFilaBaixas() {
+  try {
+    const db = await abrirIDB();
+    return new Promise((resolve) => {
+      const req = db
+        .transaction("pending_baixas")
+        .objectStore("pending_baixas")
+        .count();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(0);
+    });
+  } catch {
+    return 0;
+  }
+}
+
+async function lerFilaBaixas(db) {
+  return new Promise((resolve) => {
+    const lista = [];
+    const req = db
+      .transaction("pending_baixas")
+      .objectStore("pending_baixas")
+      .openCursor();
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (cursor) {
+        lista.push({ idbKey: cursor.primaryKey, ...cursor.value });
+        cursor.continue();
+      } else {
+        resolve(lista);
+      }
+    };
+    req.onerror = () => resolve([]);
+  });
+}
+
+async function processarFilaBaixas() {
+  if (!navigator.onLine) return;
+  const db = await abrirIDB().catch(() => null);
+  if (!db) return;
+  const items = await lerFilaBaixas(db);
+  if (!items.length) return;
+
+  let successes = 0;
+  for (const item of items) {
+    try {
+      const fd = new FormData();
+      fd.append(
+        "payload",
+        JSON.stringify({
+          sheet: "SAFRA",
+          keyCol: "CONTRATO",
+          keyVal: item.contratoId,
+          data: item.campos,
+        }),
+      );
+      const resp = await fetch(GAS_URL, { method: "POST", body: fd });
+      if (resp.ok) {
+        await new Promise((res) => {
+          const tx = db.transaction("pending_baixas", "readwrite");
+          tx.objectStore("pending_baixas").delete(item.idbKey);
+          tx.oncomplete = res;
+          tx.onerror = res; // continua mesmo se delete falhar
+        });
+        successes++;
+      }
+    } catch {}
+  }
+
+  if (successes > 0) {
+    mostrarToast(
+      `${successes} baixa${successes > 1 ? "s" : ""} sincronizada${successes > 1 ? "s" : ""} com sucesso.`,
+      "sucesso",
+    );
+    carregarContratos(); // Atualiza lista com dados reais
+  }
+  atualizarIndicadorOffline();
+}
+
+async function atualizarIndicadorOffline() {
+  const banner = document.getElementById("offline-banner");
+  if (!banner) return;
+  if (!navigator.onLine) {
+    banner.classList.remove("hidden");
+    const n = await contarFilaBaixas();
+    const elP = document.getElementById("offline-pendentes");
+    if (elP) {
+      elP.textContent =
+        n > 0
+          ? ` · ${n} baixa${n > 1 ? "s" : ""} pendente${n > 1 ? "s" : ""}`
+          : "";
+    }
+    renderIcons();
+  } else {
+    banner.classList.add("hidden");
+  }
+}
+
+// =========================================
+// ESTADO DA APLICAÇÃO
+// =========================================
 let contratos = [];
 let contratoAtivo = null;
 let paginaAtual = 1;
+
+// Geolocalização
+let userLocation = null; // { lat, lng }
+let contratoDistancias = new Map(); // id → km
+let geocodificandoAtivo = false;
+const GEOCODE_CACHE_KEY = "geocode_cache_v1";
+
+// Rota
+let modoRota = false;
+let rotaSelecionados = new Set(); // Set de contrato.id
+
+// Agrupamento
+let modoAgrupamento = ""; // "" | "rua"
 
 // =========================================
 // INICIALIZAÇÃO
 // =========================================
 document.addEventListener("DOMContentLoaded", () => {
+  // Registra Service Worker (requer HTTPS ou localhost)
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () =>
+      navigator.serviceWorker.register("./sw.js").catch(() => {}),
+    );
+  }
   renderIcons();
   const tecnico = tecnicoLogado();
   if (tecnico) {
@@ -235,7 +866,20 @@ function iniciarApp() {
   document
     .getElementById("btn-logout")
     .addEventListener("click", encerrarSessao);
+
+  // Listeners de conectividade
+  window.addEventListener("online", () => {
+    mostrarToast("Conexão restaurada!", "sucesso");
+    atualizarIndicadorOffline();
+    processarFilaBaixas();
+  });
+  window.addEventListener("offline", () => {
+    mostrarToast("Sem conexão. Baixas serão salvas localmente.", "aviso");
+    atualizarIndicadorOffline();
+  });
+
   configurarEventos();
+  atualizarIndicadorOffline();
   carregarContratos();
 }
 
@@ -245,9 +889,11 @@ function iniciarApp() {
 async function carregarContratos() {
   mostrarCarregando();
   try {
-    const resposta = await fetch(SHEETDB_URL);
+    const resposta = await fetch(`${GAS_URL}?sheet=SAFRA`);
     if (!resposta.ok) throw new Error(`Erro HTTP ${resposta.status}`);
-    const dados = await resposta.json();
+    const resJson = await resposta.json();
+    if (resJson.error) throw new Error(resJson.error);
+    const dados = resJson.data ?? [];
     if (!Array.isArray(dados) || dados.length === 0) {
       mostrarVazio("Nenhum contrato encontrado na planilha.");
       return;
@@ -255,7 +901,7 @@ async function carregarContratos() {
     contratos = dados.map(mapearContrato);
 
     // Restringe cidades conforme permissão do técnico logado
-    const { cidades } = tecnicoLogado() || {};
+    const { cidades, usuario } = tecnicoLogado() || {};
     if (cidades) {
       const permitidas = cidades.map((c) => c.toLowerCase());
       contratos = contratos.filter((c) =>
@@ -263,24 +909,46 @@ async function carregarContratos() {
       );
     }
 
+    salvarContratosIDB(contratos, usuario); // cache em background, sem await
     preencherFiltros();
     renderizarLista(contratos);
   } catch (erro) {
     console.error("Erro ao carregar contratos:", erro);
-    mostrarErro(
-      "Não foi possível carregar os contratos. Verifique sua conexão.",
-    );
+    // Tenta cache offline (IndexedDB)
+    const { usuario } = tecnicoLogado() || {};
+    const cached = await lerContratosIDB(usuario);
+    if (cached && cached.length > 0) {
+      contratos = cached;
+      atualizarIndicadorOffline();
+      preencherFiltros();
+      renderizarLista(contratos);
+    } else {
+      mostrarErro(
+        "Sem conexão e sem cache disponível. Verifique sua internet.",
+      );
+    }
   }
 }
 
 async function salvarNaPlanilha(contrato, campos) {
-  const url = `https://sheetdb.io/api/v1/${SHEETDB_ID}/CONTRATO/${encodeURIComponent(contrato.contrato)}?sheet=SAFRA`;
-  const resp = await fetch(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ data: campos }),
-  });
+  if (!navigator.onLine) {
+    await enfileirarBaixa(contrato.contrato, campos);
+    throw new OfflineError("Sem conexão — baixa enfileirada");
+  }
+  const fd = new FormData();
+  fd.append(
+    "payload",
+    JSON.stringify({
+      sheet: "SAFRA",
+      keyCol: "CONTRATO",
+      keyVal: contrato.contrato,
+      data: campos,
+    }),
+  );
+  const resp = await fetch(GAS_URL, { method: "POST", body: fd });
   if (!resp.ok) throw new Error(`Erro HTTP ${resp.status}`);
+  const json = await resp.json();
+  if (json.error) throw new Error(json.error);
 }
 
 function formatarDataExec() {
@@ -308,6 +976,8 @@ function salvarFiltros() {
     status: document.getElementById("filter-status").value,
     tipo: document.getElementById("filter-tipo").value,
     tecnico: document.getElementById("filter-tecnico").value,
+    periodo: document.getElementById("filter-periodo")?.value || "",
+    distancia: document.getElementById("filter-distancia")?.value || "",
   };
   localStorage.setItem(FILTROS_KEY, JSON.stringify(f));
 }
@@ -319,8 +989,8 @@ function preencherFiltros() {
   const tipos = [
     ...new Set(contratos.map((c) => c.tipoDesconexao).filter(Boolean)),
   ].sort();
-  preencherSelect("filter-cidade", cidades, "CIDADE");
-  preencherSelect("filter-tipo", tipos, "TIPO");
+  preencherSelect("filter-cidade", cidades, "Cidade");
+  preencherSelect("filter-tipo", tipos, "Tipo");
 
   // Restaurar cidade salva antes de popular bairros
   const saved = lerFiltrosSalvos();
@@ -350,10 +1020,19 @@ function preencherFiltros() {
         ].filter(Boolean),
       ),
     ].sort();
-    preencherSelect("filter-tecnico", tecnicos, "TÉCNICO");
+    preencherSelect("filter-tecnico", tecnicos, "Técnico");
     document.getElementById("filter-tecnico").classList.remove("hidden");
     if (saved.tecnico)
       document.getElementById("filter-tecnico").value = saved.tecnico;
+  }
+
+  if (saved.periodo) {
+    const elPer = document.getElementById("filter-periodo");
+    if (elPer) elPer.value = saved.periodo;
+  }
+  if (saved.distancia) {
+    const elDist = document.getElementById("filter-distancia");
+    if (elDist) elDist.value = saved.distancia;
   }
 
   aplicarFiltros();
@@ -367,7 +1046,7 @@ function atualizarBairros() {
   const bairros = [
     ...new Set(fonte.map((c) => c.bairro).filter(Boolean)),
   ].sort();
-  preencherSelect("filter-bairro", bairros, "BAIRRO");
+  preencherSelect("filter-bairro", bairros, "Bairro");
 }
 
 function preencherSelect(id, opcoes, placeholder) {
@@ -388,6 +1067,10 @@ function limparFiltros() {
   document.getElementById("filter-status").value = "";
   document.getElementById("filter-tipo").value = "";
   document.getElementById("filter-tecnico").value = "";
+  const elPer = document.getElementById("filter-periodo");
+  if (elPer) elPer.value = "";
+  const elDist = document.getElementById("filter-distancia");
+  if (elDist) elDist.value = "";
   atualizarBairros();
   atualizarBotaoLimparBusca();
   localStorage.removeItem(FILTROS_KEY);
@@ -408,6 +1091,8 @@ function aplicarFiltros() {
   const status = document.getElementById("filter-status").value;
   const tipo = document.getElementById("filter-tipo").value;
   const tecnico = document.getElementById("filter-tecnico").value;
+  const periodo = document.getElementById("filter-periodo")?.value || "";
+  const distFiltro = document.getElementById("filter-distancia")?.value || "";
 
   const resultado = contratos.filter((c) => {
     const novoEnd = extrairNovoEndereco(c.obs2) || "";
@@ -423,7 +1108,9 @@ function aplicarFiltros() {
       (!bairro || c.bairro === bairro) &&
       (!status || c.status === status) &&
       (!tipo || c.tipoDesconexao === tipo) &&
-      (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico)
+      (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico) &&
+      filtrarPorPeriodo(c, periodo) &&
+      filtrarPorDistancia(c, distFiltro)
     );
   });
 
@@ -488,18 +1175,29 @@ function renderizarLista(lista) {
     return;
   }
 
-  // Agendados hoje (para o técnico logado) ficam no topo; depois outros agendados
-  const usuario = tecnicoLogado()?.usuario?.toLowerCase() || "";
-  const hojeStr = new Date().toLocaleDateString("pt-BR");
-  const ehAgendado = (c) =>
-    c.obs1?.trim().toUpperCase() === "AGENDADO" &&
-    c.tecnicoDesig?.trim().toLowerCase() === usuario;
-  const ehHoje = (c) => ehAgendado(c) && c.dataAgend?.trim() === hojeStr;
+  const distFiltro = document.getElementById("filter-distancia")?.value || "";
+  let ordenada;
 
-  const agendadosHoje = lista.filter(ehHoje);
-  const outrosAgendados = lista.filter((c) => ehAgendado(c) && !ehHoje(c));
-  const outros = lista.filter((c) => !ehAgendado(c));
-  const ordenada = [...agendadosHoje, ...outrosAgendados, ...outros];
+  if (userLocation && distFiltro === "mais-perto") {
+    // Ordena tudo por distância (sem geocodificados vai ao final)
+    ordenada = [...lista].sort((a, b) => {
+      const da = contratoDistancias.get(a.id) ?? Infinity;
+      const db = contratoDistancias.get(b.id) ?? Infinity;
+      return da - db;
+    });
+  } else {
+    // Ordem padrão: agendados hoje → outros agendados → demais
+    const usuario = tecnicoLogado()?.usuario?.toLowerCase() || "";
+    const hojeStr = new Date().toLocaleDateString("pt-BR");
+    const ehAgendado = (c) =>
+      c.obs1?.trim().toUpperCase() === "AGENDADO" &&
+      c.tecnicoDesig?.trim().toLowerCase() === usuario;
+    const ehHoje = (c) => ehAgendado(c) && c.dataAgend?.trim() === hojeStr;
+    const agendadosHoje = lista.filter(ehHoje);
+    const outrosAgendados = lista.filter((c) => ehAgendado(c) && !ehHoje(c));
+    const outros = lista.filter((c) => !ehAgendado(c));
+    ordenada = [...agendadosHoje, ...outrosAgendados, ...outros];
+  }
 
   const total = ordenada.length;
   const totalPags = Math.max(1, Math.ceil(total / POR_PAGINA));
@@ -511,14 +1209,45 @@ function renderizarLista(lista) {
 
   contador.textContent = `${total} contrato(s) — exibindo ${inicio + 1}–${fim}`;
 
-  container.innerHTML = pagina.map(criarCartaoHTML).join("");
+  if (modoAgrupamento === "rua") {
+    // Agrupa por nome de rua
+    const grupos = {};
+    pagina.forEach((c) => {
+      const novoEnd = extrairNovoEndereco(c.obs2);
+      const rua = extrairNomeRua(novoEnd || c.endereco);
+      if (!grupos[rua]) grupos[rua] = [];
+      grupos[rua].push(c);
+    });
+    let html = "";
+    Object.keys(grupos)
+      .sort()
+      .forEach((rua) => {
+        html += `<div class="grupo-rua-header"><i data-lucide="map-pin" class="icon icon-sm"></i> ${rua} <span class="grupo-count">${grupos[rua].length}</span></div>`;
+        html += grupos[rua].map(criarCartaoHTML).join("");
+      });
+    container.innerHTML = html;
+  } else {
+    container.innerHTML = pagina.map(criarCartaoHTML).join("");
+  }
+
   pagina.forEach((c) => {
     const el = document.getElementById(`cartao-${c.id}`);
-    if (el) el.addEventListener("click", () => abrirModal(c));
+    if (!el) return;
+    if (modoRota) {
+      el.addEventListener("click", (e) => toggleSelecaoRota(c.id, e));
+      if (rotaSelecionados.has(c.id)) el.classList.add("cartao-na-rota");
+    } else {
+      el.addEventListener("click", () => abrirModal(c));
+    }
   });
 
   renderizarPaginacao(totalPags, total);
   renderIcons();
+
+  // Inicia geocoding em background para os cartões desta página
+  if (userLocation && !geocodificandoAtivo) {
+    setTimeout(() => calcularDistanciasPagina(pagina), 100);
+  }
 }
 
 function renderizarPaginacao(totalPags, total) {
@@ -619,8 +1348,13 @@ function criarCartaoHTML(c) {
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${endExib}, ${c.cidade}`)}`;
 
+  const rotaIndicador = modoRota
+    ? `<div class="rota-indicador${rotaSelecionados.has(c.id) ? " rota-selecionado" : ""}"><i data-lucide="${rotaSelecionados.has(c.id) ? "check-circle" : "circle"}" class="icon icon-sm"></i></div>`
+    : "";
+
   return `
-    <div class="cartao status-${cls}${agendado ? " cartao-agendado" : ""}" id="cartao-${c.id}">
+    <div class="cartao status-${cls}${agendado ? " cartao-agendado" : ""}${modoRota ? " cartao-modo-rota" : ""}" id="cartao-${c.id}">
+      ${rotaIndicador}
       ${agendadoHeader}
       <div class="cartao-nome">${c.nome}</div>
       <div class="cartao-info">
@@ -633,6 +1367,8 @@ function criarCartaoHTML(c) {
       </div>
       <div class="cartao-footer">
         <span class="badge-status badge-${cls}">${c.status}</span>
+        ${criarBadgeSLA(c)}
+        ${criarBadgeDistancia(c)}
         <span class="cartao-detalhe">${c.contrato}</span>
         ${tipoBadge}
       </div>
@@ -647,6 +1383,7 @@ function statusParaClasse(s) {
       Retirado: "retirado",
       Quebra: "quebra",
       Ausente: "ausente",
+      Parcial: "parcial",
     }[s] || "pendente"
   );
 }
@@ -668,7 +1405,10 @@ function abrirModal(contrato) {
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${endParaMaps}, ${contrato.cidade}`)}`;
   const btnMaps = `<a href="${mapsUrl}" class="btn-mapa-modal" target="_blank"><i data-lucide="map-pin" class="icon icon-sm"></i> Ver no Google Maps</a>`;
 
+  const duplicatas = detectarDuplicatas(contrato);
+
   body.innerHTML = `
+    ${criarAlertaDuplicatasHTML(duplicatas)}
     <div class="detalhe-titulo">${contrato.nome}</div>
     ${campo("Contrato", contrato.contrato)}
     ${campo("Cidade", contrato.cidade)}
@@ -693,6 +1433,7 @@ function abrirModal(contrato) {
     ${campo("Data de Execução", contrato.dataExec)}
     ${campo("Status atual", contrato.status)}
     ${criarFotosModal(contrato.fotoExec)}
+    ${criarVisitasHTML(contrato.visitas)}
 
     <div class="secao-telefones">${criarBotoesPhone(contrato)}</div>
     <div class="acoes" id="acoes-modal">${criarAcoesHTML()}</div>`;
@@ -704,7 +1445,8 @@ function abrirModal(contrato) {
 function criarAcoesHTML() {
   return `
     <button class="btn btn-retirado" onclick="mostrarConfirmacaoRetirado()">Marcar como Retirado</button>
-    <button class="btn btn-quebra"   onclick="mostrarSeletorQuebra()">Marcar como Quebra</button>`;
+    <button class="btn btn-quebra"   onclick="mostrarSeletorQuebra()">Marcar como Quebra</button>
+    <button class="btn btn-visita"   onclick="registrarTentativa()"><i data-lucide="navigation" class="icon icon-sm"></i> Registrar Tentativa de Visita</button>`;
 }
 
 // --- Fluxo Retirado ---
@@ -728,13 +1470,22 @@ async function confirmarRetirado() {
   }
   if (!validarFotos()) return;
   const seriaisRet = getSeriaisSelecionados();
+  const qtdSel = seriaisRet
+    ? seriaisRet.split(" / ").filter(Boolean).length
+    : 0;
+  const isParcial =
+    listaSer.length > 0 && qtdSel > 0 && qtdSel < listaSer.length;
+  const novoStatus = isParcial ? "Parcial" : "Retirado";
+  const codigoOS = isParcial
+    ? `Parcial - ${qtdSel} de ${listaSer.length} equipamentos retirados`
+    : "430 - Equipamento retirado";
   await executarSalvamento(
     {
-      STATUS: "Retirado",
-      [COL_CODIGO_OS]: "430 - Equipamento retirado",
+      STATUS: novoStatus,
+      [COL_CODIGO_OS]: codigoOS,
       [COL_SERIAIS_RET]: seriaisRet,
     },
-    "Retirado",
+    novoStatus,
   );
 }
 
@@ -789,7 +1540,11 @@ async function executarSalvamento(camposBase, novoStatus) {
   // Upload de fotos (pode ser vazio se não houver chave ou arquivos)
   let fotoExec = "";
   const fotoInput = document.getElementById("foto-input");
-  if (IMGBB_API_KEY !== "SUA_CHAVE_IMGBB_AQUI" && fotoInput?.files?.length) {
+  if (
+    IMGBB_API_KEY !== "SUA_CHAVE_IMGBB_AQUI" &&
+    fotoInput?.files?.length &&
+    navigator.onLine
+  ) {
     try {
       mostrarStatusUpload("Enviando fotos...");
       fotoExec = await uploadTodasFotos(fotoInput);
@@ -829,9 +1584,36 @@ async function executarSalvamento(camposBase, novoStatus) {
     mostrarToast("Baixa registrada com sucesso.", "sucesso");
     aplicarFiltros();
   } catch (erro) {
-    console.error("Erro ao salvar:", erro);
-    mostrarToast("Erro ao salvar. Verifique sua conexão e tente novamente.", "erro");
-    btns.forEach((b) => (b.disabled = false));
+    if (erro instanceof OfflineError) {
+      const idx = contratos.findIndex((c) => c.id === contratoAtivo.id);
+      if (idx !== -1) {
+        contratos[idx] = {
+          ...contratos[idx],
+          status: novoStatus,
+          codigoOS: camposBase[COL_CODIGO_OS],
+          obsExec: campos[COL_OBS_EXEC],
+          dataExec: campos[COL_DATA_EXEC],
+          tecnicoExec: tecnico,
+          seriaisRet: camposBase[COL_SERIAIS_RET] || contratos[idx].seriaisRet,
+          baixaSite: "Sim",
+          _pendente: true,
+        };
+      }
+      fecharModal();
+      mostrarToast(
+        "Sem conexão. Baixa salva localmente e será enviada ao reconectar.",
+        "aviso",
+      );
+      atualizarIndicadorOffline();
+      aplicarFiltros();
+    } else {
+      console.error("Erro ao salvar:", erro);
+      mostrarToast(
+        "Erro ao salvar. Verifique sua conexão e tente novamente.",
+        "erro",
+      );
+      btns.forEach((b) => (b.disabled = false));
+    }
   }
 }
 
@@ -966,6 +1748,7 @@ function criarFotosModal(fotoExec) {
 function validarFotos() {
   const fotoInput = document.getElementById("foto-input");
   if (!fotoInput?.files?.length) {
+    if (!navigator.onLine) return true; // offline: bypass, foto será registrada depois
     mostrarToast("Anexe ao menos uma foto de evidência.", "aviso");
     return false;
   }
@@ -1078,7 +1861,7 @@ const TUTORIAL_PASSOS = [
     texto: `Ao confirmar uma baixa (retirado ou quebra), você pode <strong>anexar fotos</strong> diretamente pelo site.<br/><br/>
             As fotos ficam salvas na nuvem e qualquer pessoa com acesso ao sistema pode ver.<br/><br/>
             Isso substitui o envio pelo grupo do WhatsApp.<br/><br/>
-            💡 <em>Tire a foto do equipamento, do ambiente e/ou da fachada para garantir a evidência.</em>`,
+            💡 <em>Tire a foto do serial do equipamento, geolocalização e tentativa de contato.</em>`,
   },
 ];
 
@@ -1198,11 +1981,23 @@ function preencherFiltrosAdmin() {
       ].filter(Boolean),
     ),
   ].sort();
-  preencherSelect("adm-filter-cidade", cidades, "CIDADE");
-  preencherSelect("adm-filter-tecnico", tecnicos, "TÉCNICO");
+  preencherSelect("adm-filter-cidade", cidades, "Cidade");
+  preencherSelect("adm-filter-tecnico", tecnicos, "Técnico");
 }
 
 function getContratosAdmin() {
+  const cidade = document.getElementById("adm-filter-cidade").value;
+  const tecnico = document.getElementById("adm-filter-tecnico").value;
+  const periodo = document.getElementById("adm-filter-periodo")?.value || "";
+  return contratos.filter(
+    (c) =>
+      (!cidade || c.cidade === cidade) &&
+      (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico) &&
+      filtrarPorPeriodo(c, periodo),
+  );
+}
+
+function getContratosAdminSemPeriodo() {
   const cidade = document.getElementById("adm-filter-cidade").value;
   const tecnico = document.getElementById("adm-filter-tecnico").value;
   return contratos.filter(
@@ -1325,15 +2120,82 @@ function renderizarHistoricoHTML(lista) {
 }
 
 function renderizarRelatorioHTML() {
+  const periodos = calcularEficienciaPeriodos();
+  const linhasEfic = periodos
+    .map((p) => {
+      const taxa =
+        p.total > 0
+          ? Math.round(((p.retirados + p.parciais) / p.total) * 100)
+          : 0;
+      const taxaCls =
+        taxa >= 70
+          ? "num-retirado"
+          : taxa >= 50
+            ? "num-pendente"
+            : "num-quebra";
+      return `<tr>
+      <td>${p.label}</td>
+      <td class="num-pendente">${p.pendentes}</td>
+      <td class="num-retirado">${p.retirados}</td>
+      <td style="color:#8b5cf6;font-weight:700">${p.parciais}</td>
+      <td class="num-quebra">${p.quebras}</td>
+      <td>${p.total}</td>
+      <td class="${taxaCls}">${taxa}%</td>
+    </tr>`;
+    })
+    .join("");
+
   return `
     <div class="admin-secao">
-      <h3 class="admin-secao-titulo">Exportar Relatório</h3>
+      <h3 class="admin-secao-titulo">Exportar CSV</h3>
       <p class="relatorio-desc">
         Exporta todos os contratos conforme os filtros acima em formato CSV (compatível com Excel).
         Inclui status, técnico responsável, data de execução e demais campos.
       </p>
       <button class="btn btn-relatorio" onclick="baixarCSV()"><i data-lucide="download" class="icon icon-sm"></i> Baixar CSV</button>
+    </div>
+
+    <div class="admin-secao">
+      <h3 class="admin-secao-titulo">Eficiência por Período (DATA_PEND)</h3>
+      <div class="tabela-scroll">
+        <table class="admin-table">
+          <thead><tr><th>Período</th><th>Pendente</th><th>Retirado</th><th>Parcial</th><th>Quebra</th><th>Total</th><th>Taxa</th></tr></thead>
+          <tbody>${linhasEfic || '<tr><td colspan="7" class="tabela-vazia">Nenhum dado com DATA_PEND preenchida</td></tr>'}</tbody>
+        </table>
+      </div>
     </div>`;
+}
+
+function calcularEficienciaPeriodos() {
+  const lista = getContratosAdminSemPeriodo();
+  const meses = {};
+  lista.forEach((c) => {
+    if (!c.dataPend) return;
+    const m = c.dataPend.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!m) return;
+    const chave = `${m[3]}-${m[2]}`;
+    const label = `${m[2]}/${m[3]}`;
+    if (!meses[chave])
+      meses[chave] = {
+        label,
+        total: 0,
+        retirados: 0,
+        quebras: 0,
+        pendentes: 0,
+        parciais: 0,
+      };
+    meses[chave].total++;
+    if (c.status === "Retirado") meses[chave].retirados++;
+    else if (c.status === "Quebra") meses[chave].quebras++;
+    else if (c.status === "Parcial") {
+      meses[chave].parciais++;
+      meses[chave].retirados++;
+    } else meses[chave].pendentes++;
+  });
+  return Object.entries(meses)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .slice(0, 6)
+    .map(([, v]) => v);
 }
 
 function baixarCSV() {
@@ -1418,6 +2280,32 @@ function configurarEventos() {
   document
     .getElementById("filter-tecnico")
     .addEventListener("change", filtroAlterado);
+  const elPeriodo = document.getElementById("filter-periodo");
+  if (elPeriodo) elPeriodo.addEventListener("change", filtroAlterado);
+
+  const elDist = document.getElementById("filter-distancia");
+  if (elDist) {
+    elDist.addEventListener("change", (e) => {
+      if (e.target.value && !userLocation) {
+        mostrarToast(
+          "Ative a localização para usar o filtro de distância.",
+          "aviso",
+        );
+      }
+      filtroAlterado();
+    });
+  }
+
+  document
+    .getElementById("btn-localizacao")
+    ?.addEventListener("click", ativarLocalizacao);
+  document
+    .getElementById("btn-montar-rota")
+    ?.addEventListener("click", toggleModoRota);
+  document
+    .getElementById("btn-agrupar")
+    ?.addEventListener("click", toggleAgrupamento);
+
   document
     .getElementById("btn-limpar-filtros")
     .addEventListener("click", limparFiltros);
@@ -1442,6 +2330,8 @@ function configurarEventos() {
   document
     .getElementById("adm-filter-tecnico")
     .addEventListener("change", renderizarAdmin);
+  const elAdmPeriodo = document.getElementById("adm-filter-periodo");
+  if (elAdmPeriodo) elAdmPeriodo.addEventListener("change", renderizarAdmin);
 
   // Tutorial
   document

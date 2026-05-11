@@ -1,138 +1,231 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Backlog Safra — Retirada de Equipamentos</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-
-  <header class="header">
-    <div class="header-top">
-      <div>
-        <h1>Backlog Safra</h1>
-        <p>Retirada de Equipamentos</p>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Backlog Safra — Retirada de Equipamentos</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#0056b3" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Backlog Safra" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="header-top">
+        <div>
+          <h1>Backlog Safra</h1>
+          <p>Retirada de Equipamentos</p>
+        </div>
+        <div id="header-user" class="header-user hidden">
+          <span id="header-nome-tecnico"></span>
+          <div class="header-btns">
+            <button id="btn-admin" class="btn-admin hidden">Admin</button>
+            <button id="btn-logout" class="btn-logout">Sair</button>
+          </div>
+        </div>
       </div>
-      <div id="header-user" class="header-user hidden">
-        <span id="header-nome-tecnico"></span>
-        <div class="header-btns">
-          <button id="btn-admin" class="btn-admin hidden">Admin</button>
-          <button id="btn-logout" class="btn-logout">Sair</button>
+    </header>
+
+    <!-- ===== TELA DE LOGIN ===== -->
+    <div id="tela-login" class="tela-login">
+      <div class="login-card">
+        <div class="login-logo">
+          <i data-lucide="wrench" class="icon icon-login"></i>
+        </div>
+        <h2 class="login-titulo">Acesso ao Sistema</h2>
+        <p class="login-subtitulo">Backlog Safra — EQS Engenharia</p>
+        <div id="login-erro" class="login-erro hidden">
+          Usuário ou senha incorretos.
+        </div>
+        <label class="login-label">Usuário</label>
+        <input
+          type="text"
+          id="login-usuario"
+          class="login-input"
+          placeholder="seu.usuario"
+          autocomplete="username"
+        />
+        <label class="login-label">Senha</label>
+        <input
+          type="password"
+          id="login-senha"
+          class="login-input"
+          placeholder="••••••"
+          autocomplete="current-password"
+        />
+        <button id="btn-entrar" class="btn-entrar">Entrar</button>
+      </div>
+    </div>
+
+    <!-- ===== APP PRINCIPAL ===== -->
+    <main class="container hidden" id="app-principal">
+      <!-- Banner offline -->
+      <div id="offline-banner" class="offline-banner hidden">
+        <i data-lucide="wifi-off" class="icon"></i>
+        <span>Modo offline</span>
+        <span id="offline-pendentes" class="offline-pendentes"></span>
+      </div>
+
+      <section class="filters" id="filters">
+        <div class="search-wrapper">
+          <input
+            type="text"
+            id="search"
+            class="input-search"
+            placeholder="Buscar por nome, contrato ou endereço..."
+          />
+          <button
+            id="btn-limpar-busca"
+            class="btn-limpar-busca hidden"
+            aria-label="Limpar busca"
+          >
+            <i data-lucide="x" class="icon"></i>
+          </button>
+        </div>
+        <div class="filter-row">
+          <select id="filter-cidade" class="input-select">
+            <option value="">Cidade</option>
+          </select>
+          <select id="filter-bairro" class="input-select">
+            <option value="">Bairro</option>
+          </select>
+          <select id="filter-status" class="input-select">
+            <option value="">Status</option>
+            <option value="Pendente">Pendente</option>
+            <option value="Retirado">Retirado</option>
+            <option value="Parcial">Parcial</option>
+            <option value="Quebra">Quebra</option>
+          </select>
+          <select id="filter-tipo" class="input-select">
+            <option value="">Tipo</option>
+          </select>
+          <select id="filter-tecnico" class="input-select hidden">
+            <option value="">Técnico</option>
+          </select>
+          <select id="filter-periodo" class="input-select">
+            <option value="">Período</option>
+            <option value="semana">Esta semana</option>
+            <option value="mes">Este mês</option>
+            <option value="mes-anterior">Mês anterior</option>
+          </select>
+          <select id="filter-distancia" class="input-select">
+            <option value="">Distância</option>
+            <option value="mais-perto">Mais perto</option>
+            <option value="500m">Até 500m</option>
+            <option value="1km">Até 1km</option>
+            <option value="5km">Até 5km</option>
+            <option value="10km">Até 10km</option>
+          </select>
+          <button id="btn-localizacao" class="input-select btn-filtro-acao">
+            <i data-lucide="navigation" class="icon icon-sm"></i> Localização
+          </button>
+          <button id="btn-montar-rota" class="input-select btn-filtro-acao">
+            <i data-lucide="route" class="icon icon-sm"></i> Rota
+          </button>
+          <button id="btn-agrupar" class="input-select btn-filtro-acao">
+            <i data-lucide="layers" class="icon icon-sm"></i> Por rua
+          </button>
+        </div>
+        <button id="btn-limpar-filtros" class="btn-limpar-filtros">
+          Limpar filtros
+        </button>
+      </section>
+
+      <p class="resultado-count" id="resultado-count">
+        Carregando contratos...
+      </p>
+      <section id="lista-contratos" class="lista-contratos"></section>
+      <div id="paginacao" class="paginacao hidden"></div>
+    </main>
+
+    <!-- ===== BARRA DE ROTA (fixa, visível só em modo rota) ===== -->
+    <div id="barra-rota" class="barra-rota hidden"></div>
+
+    <!-- ===== TELA ADMIN ===== -->
+    <div id="tela-admin" class="tela-admin hidden">
+      <div class="admin-topbar">
+        <button id="btn-voltar-lista" class="btn-voltar-lista">
+          <i data-lucide="arrow-left" class="icon icon-sm"></i> Voltar
+        </button>
+        <span class="admin-titulo">Painel Administrativo</span>
+      </div>
+      <div class="admin-tabs" id="admin-tabs">
+        <button class="admin-tab admin-tab-ativo" data-tab="metricas">
+          <i data-lucide="bar-chart-2" class="icon icon-sm"></i> Métricas
+        </button>
+        <button class="admin-tab" data-tab="historico">
+          <i data-lucide="list" class="icon icon-sm"></i> Histórico
+        </button>
+        <button class="admin-tab" data-tab="relatorio">
+          <i data-lucide="download" class="icon icon-sm"></i> Relatório
+        </button>
+      </div>
+      <div class="admin-filtros">
+        <select id="adm-filter-cidade" class="input-select">
+          <option value="">CIDADE</option>
+        </select>
+        <select id="adm-filter-tecnico" class="input-select">
+          <option value="">TÉCNICO</option>
+        </select>
+        <select id="adm-filter-periodo" class="input-select">
+          <option value="">PERÍODO</option>
+          <option value="semana">Esta semana</option>
+          <option value="mes">Este mês</option>
+          <option value="mes-anterior">Mês anterior</option>
+        </select>
+      </div>
+      <div id="admin-conteudo" class="admin-conteudo"></div>
+    </div>
+
+    <!-- ===== MODAL DE DETALHES ===== -->
+    <div id="modal" class="modal hidden">
+      <div class="modal-content">
+        <button class="modal-fechar" id="modal-fechar">
+          <i data-lucide="x" class="icon icon-sm"></i> Fechar
+        </button>
+        <div id="modal-body"></div>
+      </div>
+    </div>
+
+    <!-- ===== MODAL DE TUTORIAL ===== -->
+    <div id="modal-tutorial" class="modal hidden">
+      <div class="modal-content tutorial-content">
+        <div class="tutorial-header">
+          <span class="tutorial-contador"
+            >Passo <span id="tut-atual">1</span> de
+            <span id="tut-total">1</span></span
+          >
+          <button id="tutorial-fechar" class="tutorial-fechar-btn">
+            <i data-lucide="x" class="icon icon-sm"></i>
+          </button>
+        </div>
+        <div class="tutorial-dots" id="tutorial-dots"></div>
+        <div id="tutorial-body" class="tutorial-body"></div>
+        <div class="tutorial-nav">
+          <button id="tut-prev" class="btn-tut-nav">Anterior</button>
+          <button id="tut-next" class="btn-tut-nav btn-tut-next">
+            Próximo
+          </button>
         </div>
       </div>
     </div>
-  </header>
 
-  <!-- ===== TELA DE LOGIN ===== -->
-  <div id="tela-login" class="tela-login">
-    <div class="login-card">
-      <div class="login-logo"><i data-lucide="wrench" class="icon icon-login"></i></div>
-      <h2 class="login-titulo">Acesso ao Sistema</h2>
-      <p class="login-subtitulo">Backlog Safra — EQS Engenharia</p>
-      <div id="login-erro" class="login-erro hidden">Usuário ou senha incorretos.</div>
-      <label class="login-label">Usuário</label>
-      <input type="text" id="login-usuario" class="login-input" placeholder="seu.usuario" autocomplete="username" />
-      <label class="login-label">Senha</label>
-      <input type="password" id="login-senha" class="login-input" placeholder="••••••" autocomplete="current-password" />
-      <button id="btn-entrar" class="btn-entrar">Entrar</button>
-    </div>
-  </div>
+    <!-- ===== BOTÃO TUTORIAL (fixo) ===== -->
+    <button id="btn-tutorial" class="btn-tutorial" aria-label="Abrir tutorial">
+      <i data-lucide="help-circle" class="icon icon-tutorial"></i>
+    </button>
 
-  <!-- ===== APP PRINCIPAL ===== -->
-  <main class="container hidden" id="app-principal">
+    <!-- ===== TOAST (notificações unificadas) ===== -->
+    <div id="toast" class="toast hidden"></div>
 
-    <section class="filters" id="filters">
-      <div class="search-wrapper">
-        <input type="text" id="search" class="input-search" placeholder="Buscar por nome, contrato ou endereço..." />
-        <button id="btn-limpar-busca" class="btn-limpar-busca hidden" aria-label="Limpar busca">
-          <i data-lucide="x" class="icon"></i>
-        </button>
-      </div>
-      <div class="filter-row">
-        <select id="filter-cidade"  class="input-select"><option value="">CIDADE</option></select>
-        <select id="filter-bairro"  class="input-select"><option value="">BAIRRO</option></select>
-        <select id="filter-status"  class="input-select">
-          <option value="">STATUS</option>
-          <option value="Pendente">Pendente</option>
-          <option value="Retirado">Retirado</option>
-          <option value="Quebra">Quebra</option>
-        </select>
-        <select id="filter-tipo"    class="input-select"><option value="">TIPO</option></select>
-        <select id="filter-tecnico" class="input-select hidden"><option value="">TÉCNICO</option></select>
-      </div>
-      <button id="btn-limpar-filtros" class="btn-limpar-filtros">Limpar filtros</button>
-    </section>
-
-    <p class="resultado-count" id="resultado-count">Carregando contratos...</p>
-    <section id="lista-contratos" class="lista-contratos"></section>
-    <div id="paginacao" class="paginacao hidden"></div>
-
-  </main>
-
-  <!-- ===== TELA ADMIN ===== -->
-  <div id="tela-admin" class="tela-admin hidden">
-    <div class="admin-topbar">
-      <button id="btn-voltar-lista" class="btn-voltar-lista">
-        <i data-lucide="arrow-left" class="icon icon-sm"></i> Voltar
-      </button>
-      <span class="admin-titulo">Painel Administrativo</span>
-    </div>
-    <div class="admin-tabs" id="admin-tabs">
-      <button class="admin-tab admin-tab-ativo" data-tab="metricas">
-        <i data-lucide="bar-chart-2" class="icon icon-sm"></i> Métricas
-      </button>
-      <button class="admin-tab" data-tab="historico">
-        <i data-lucide="list" class="icon icon-sm"></i> Histórico
-      </button>
-      <button class="admin-tab" data-tab="relatorio">
-        <i data-lucide="download" class="icon icon-sm"></i> Relatório
-      </button>
-    </div>
-    <div class="admin-filtros">
-      <select id="adm-filter-cidade"  class="input-select"><option value="">CIDADE</option></select>
-      <select id="adm-filter-tecnico" class="input-select"><option value="">TÉCNICO</option></select>
-    </div>
-    <div id="admin-conteudo" class="admin-conteudo"></div>
-  </div>
-
-  <!-- ===== MODAL DE DETALHES ===== -->
-  <div id="modal" class="modal hidden">
-    <div class="modal-content">
-      <button class="modal-fechar" id="modal-fechar">
-        <i data-lucide="x" class="icon icon-sm"></i> Fechar
-      </button>
-      <div id="modal-body"></div>
-    </div>
-  </div>
-
-  <!-- ===== MODAL DE TUTORIAL ===== -->
-  <div id="modal-tutorial" class="modal hidden">
-    <div class="modal-content tutorial-content">
-      <div class="tutorial-header">
-        <span class="tutorial-contador">Passo <span id="tut-atual">1</span> de <span id="tut-total">1</span></span>
-        <button id="tutorial-fechar" class="tutorial-fechar-btn">
-          <i data-lucide="x" class="icon icon-sm"></i>
-        </button>
-      </div>
-      <div class="tutorial-dots" id="tutorial-dots"></div>
-      <div id="tutorial-body" class="tutorial-body"></div>
-      <div class="tutorial-nav">
-        <button id="tut-prev" class="btn-tut-nav">Anterior</button>
-        <button id="tut-next" class="btn-tut-nav btn-tut-next">Próximo</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== BOTÃO TUTORIAL (fixo) ===== -->
-  <button id="btn-tutorial" class="btn-tutorial" aria-label="Abrir tutorial">
-    <i data-lucide="help-circle" class="icon icon-tutorial"></i>
-  </button>
-
-  <!-- ===== TOAST (notificações unificadas) ===== -->
-  <div id="toast" class="toast hidden"></div>
-
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <script src="script.js"></script>
-</body>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="script.js"></script>
+  </body>
 </html>
