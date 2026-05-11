@@ -74,21 +74,28 @@
       </div>
 
       <section class="filters" id="filters">
-        <div class="search-wrapper">
-          <input
-            type="text"
-            id="search"
-            class="input-search"
-            placeholder="Buscar por nome, contrato ou endereço..."
-          />
-          <button
-            id="btn-limpar-busca"
-            class="btn-limpar-busca hidden"
-            aria-label="Limpar busca"
-          >
-            <i data-lucide="x" class="icon"></i>
+        <div class="search-row">
+          <div class="search-wrapper">
+            <input
+              type="text"
+              id="search"
+              class="input-search"
+              placeholder="Buscar por nome, contrato ou endereço..."
+            />
+            <button
+              id="btn-limpar-busca"
+              class="btn-limpar-busca hidden"
+              aria-label="Limpar busca"
+            >
+              <i data-lucide="x" class="icon"></i>
+            </button>
+          </div>
+          <button id="btn-toggle-filtros" class="btn-toggle-filtros" onclick="toggleFiltros()" aria-label="Filtros">
+            <i data-lucide="sliders-horizontal" class="icon icon-sm"></i>
+            <span id="badge-filtros-ativos" class="badge-filtros hidden"></span>
           </button>
         </div>
+        <div id="filtros-panel" class="filtros-panel hidden">
         <div class="filter-row">
           <select id="filter-cidade" class="input-select">
             <option value="">Cidade</option>
@@ -133,9 +140,10 @@
             <i data-lucide="layers" class="icon icon-sm"></i> Por rua
           </button>
         </div>
-        <button id="btn-limpar-filtros" class="btn-limpar-filtros">
-          Limpar filtros
-        </button>
+          <button id="btn-limpar-filtros" class="btn-limpar-filtros">
+            Limpar filtros
+          </button>
+        </div>
       </section>
 
       <p class="resultado-count" id="resultado-count">

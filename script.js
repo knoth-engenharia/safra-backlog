@@ -436,6 +436,7 @@ function atualizarBarraRota() {
       ? "Nenhum contrato selecionado"
       : `${n} parada${n > 1 ? "s" : ""} na rota`;
   barra.innerHTML = `
+    <button class="btn-cancelar-rota" onclick="toggleModoRota()" title="Cancelar rota"><i data-lucide="x" class="icon icon-sm"></i></button>
     <span class="barra-rota-info">${info}</span>
     <button class="btn-abrir-rota" onclick="abrirRotaMaps()" ${n < 1 ? "disabled" : ""}><i data-lucide="map" class="icon icon-sm"></i> Abrir no Maps</button>`;
   renderIcons();
@@ -1084,7 +1085,33 @@ function filtroAlterado() {
   aplicarFiltros();
 }
 
+function toggleFiltros() {
+  const panel = document.getElementById("filtros-panel");
+  const btn = document.getElementById("btn-toggle-filtros");
+  const abrindo = panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !abrindo);
+  btn.classList.toggle("btn-filtros-aberto", abrindo);
+  renderIcons();
+}
+
+function atualizarBadgeFiltros() {
+  const badge = document.getElementById("badge-filtros-ativos");
+  if (!badge) return;
+  const ids = ["filter-cidade", "filter-bairro", "filter-status", "filter-tipo",
+               "filter-tecnico", "filter-periodo", "filter-distancia"];
+  let count = ids.filter((id) => document.getElementById(id)?.value).length;
+  if (userLocation) count++;
+  if (modoAgrupamento) count++;
+  if (count > 0) {
+    badge.textContent = count;
+    badge.classList.remove("hidden");
+  } else {
+    badge.classList.add("hidden");
+  }
+}
+
 function aplicarFiltros() {
+  atualizarBadgeFiltros();
   const busca = document.getElementById("search").value.toLowerCase().trim();
   const cidade = document.getElementById("filter-cidade").value;
   const bairro = document.getElementById("filter-bairro").value;
@@ -1186,7 +1213,8 @@ function renderizarLista(lista) {
       return da - db;
     });
   } else {
-    // Ordem padrão: agendados hoje → outros agendados → demais
+    // Ordem padrão: agendados hoje → outros agendados → Pendente → Parcial → Quebra → Retirado
+    const STATUS_ORDEM = { Pendente: 0, Parcial: 1, Quebra: 2, Ausente: 2, Retirado: 3 };
     const usuario = tecnicoLogado()?.usuario?.toLowerCase() || "";
     const hojeStr = new Date().toLocaleDateString("pt-BR");
     const ehAgendado = (c) =>
@@ -1195,7 +1223,9 @@ function renderizarLista(lista) {
     const ehHoje = (c) => ehAgendado(c) && c.dataAgend?.trim() === hojeStr;
     const agendadosHoje = lista.filter(ehHoje);
     const outrosAgendados = lista.filter((c) => ehAgendado(c) && !ehHoje(c));
-    const outros = lista.filter((c) => !ehAgendado(c));
+    const outros = lista
+      .filter((c) => !ehAgendado(c))
+      .sort((a, b) => (STATUS_ORDEM[a.status] ?? 2) - (STATUS_ORDEM[b.status] ?? 2));
     ordenada = [...agendadosHoje, ...outrosAgendados, ...outros];
   }
 
@@ -1445,8 +1475,7 @@ function abrirModal(contrato) {
 function criarAcoesHTML() {
   return `
     <button class="btn btn-retirado" onclick="mostrarConfirmacaoRetirado()">Marcar como Retirado</button>
-    <button class="btn btn-quebra"   onclick="mostrarSeletorQuebra()">Marcar como Quebra</button>
-    <button class="btn btn-visita"   onclick="registrarTentativa()"><i data-lucide="navigation" class="icon icon-sm"></i> Registrar Tentativa de Visita</button>`;
+    <button class="btn btn-quebra"   onclick="mostrarSeletorQuebra()">Marcar como Quebra</button>`;
 }
 
 // --- Fluxo Retirado ---
@@ -1553,6 +1582,10 @@ async function executarSalvamento(camposBase, novoStatus) {
     }
   }
 
+  // Registra visita automaticamente ao concluir qualquer ação
+  const visitasAnt = contratoAtivo.visitas || "";
+  const novasVisitas = visitasAnt ? `${visitasAnt}|${dataExec}` : dataExec;
+
   const campos = {
     ...camposBase,
     [COL_OBS_EXEC]: obsExec,
@@ -1560,6 +1593,7 @@ async function executarSalvamento(camposBase, novoStatus) {
     [COL_TECNICO]: tecnico,
     [COL_FOTO]: fotoExec,
     [COL_BAIXA_SITE]: "Sim",
+    [COL_VISITAS]: novasVisitas,
   };
 
   try {
@@ -1577,6 +1611,7 @@ async function executarSalvamento(camposBase, novoStatus) {
         fotoExec,
         seriaisRet: camposBase[COL_SERIAIS_RET] || contratos[idx].seriaisRet,
         baixaSite: "Sim",
+        visitas: novasVisitas,
       };
     }
 
@@ -1596,6 +1631,7 @@ async function executarSalvamento(camposBase, novoStatus) {
           tecnicoExec: tecnico,
           seriaisRet: camposBase[COL_SERIAIS_RET] || contratos[idx].seriaisRet,
           baixaSite: "Sim",
+          visitas: novasVisitas,
           _pendente: true,
         };
       }
