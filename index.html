@@ -16,7 +16,10 @@
       </div>
       <div id="header-user" class="header-user hidden">
         <span id="header-nome-tecnico"></span>
-        <button id="btn-logout" class="btn-logout">Sair</button>
+        <div class="header-btns">
+          <button id="btn-admin" class="btn-admin hidden">Admin</button>
+          <button id="btn-logout" class="btn-logout">Sair</button>
+        </div>
       </div>
     </div>
   </header>
@@ -24,7 +27,7 @@
   <!-- ===== TELA DE LOGIN ===== -->
   <div id="tela-login" class="tela-login">
     <div class="login-card">
-      <div class="login-logo">🔧</div>
+      <div class="login-logo"><i data-lucide="wrench" class="icon icon-login"></i></div>
       <h2 class="login-titulo">Acesso ao Sistema</h2>
       <p class="login-subtitulo">Backlog Safra — EQS Engenharia</p>
       <div id="login-erro" class="login-erro hidden">Usuário ou senha incorretos.</div>
@@ -42,18 +45,21 @@
     <section class="filters" id="filters">
       <div class="search-wrapper">
         <input type="text" id="search" class="input-search" placeholder="Buscar por nome, contrato ou endereço..." />
-        <button id="btn-limpar-busca" class="btn-limpar-busca hidden" aria-label="Limpar busca">✕</button>
+        <button id="btn-limpar-busca" class="btn-limpar-busca hidden" aria-label="Limpar busca">
+          <i data-lucide="x" class="icon"></i>
+        </button>
       </div>
       <div class="filter-row">
-        <select id="filter-cidade" class="input-select"><option value="">Todas as cidades</option></select>
-        <select id="filter-bairro" class="input-select"><option value="">Todos os bairros</option></select>
-        <select id="filter-status" class="input-select">
-          <option value="">Todos os status</option>
+        <select id="filter-cidade"  class="input-select"><option value="">CIDADE</option></select>
+        <select id="filter-bairro"  class="input-select"><option value="">BAIRRO</option></select>
+        <select id="filter-status"  class="input-select">
+          <option value="">STATUS</option>
           <option value="Pendente">Pendente</option>
           <option value="Retirado">Retirado</option>
           <option value="Quebra">Quebra</option>
         </select>
-        <select id="filter-tipo" class="input-select"><option value="">Todos os tipos</option></select>
+        <select id="filter-tipo"    class="input-select"><option value="">TIPO</option></select>
+        <select id="filter-tecnico" class="input-select hidden"><option value="">TÉCNICO</option></select>
       </div>
       <button id="btn-limpar-filtros" class="btn-limpar-filtros">Limpar filtros</button>
     </section>
@@ -64,10 +70,38 @@
 
   </main>
 
+  <!-- ===== TELA ADMIN ===== -->
+  <div id="tela-admin" class="tela-admin hidden">
+    <div class="admin-topbar">
+      <button id="btn-voltar-lista" class="btn-voltar-lista">
+        <i data-lucide="arrow-left" class="icon icon-sm"></i> Voltar
+      </button>
+      <span class="admin-titulo">Painel Administrativo</span>
+    </div>
+    <div class="admin-tabs" id="admin-tabs">
+      <button class="admin-tab admin-tab-ativo" data-tab="metricas">
+        <i data-lucide="bar-chart-2" class="icon icon-sm"></i> Métricas
+      </button>
+      <button class="admin-tab" data-tab="historico">
+        <i data-lucide="list" class="icon icon-sm"></i> Histórico
+      </button>
+      <button class="admin-tab" data-tab="relatorio">
+        <i data-lucide="download" class="icon icon-sm"></i> Relatório
+      </button>
+    </div>
+    <div class="admin-filtros">
+      <select id="adm-filter-cidade"  class="input-select"><option value="">CIDADE</option></select>
+      <select id="adm-filter-tecnico" class="input-select"><option value="">TÉCNICO</option></select>
+    </div>
+    <div id="admin-conteudo" class="admin-conteudo"></div>
+  </div>
+
   <!-- ===== MODAL DE DETALHES ===== -->
   <div id="modal" class="modal hidden">
     <div class="modal-content">
-      <button class="modal-fechar" id="modal-fechar">✕ Fechar</button>
+      <button class="modal-fechar" id="modal-fechar">
+        <i data-lucide="x" class="icon icon-sm"></i> Fechar
+      </button>
       <div id="modal-body"></div>
     </div>
   </div>
@@ -77,26 +111,28 @@
     <div class="modal-content tutorial-content">
       <div class="tutorial-header">
         <span class="tutorial-contador">Passo <span id="tut-atual">1</span> de <span id="tut-total">1</span></span>
-        <button id="tutorial-fechar" class="tutorial-fechar-btn">✕</button>
+        <button id="tutorial-fechar" class="tutorial-fechar-btn">
+          <i data-lucide="x" class="icon icon-sm"></i>
+        </button>
       </div>
       <div class="tutorial-dots" id="tutorial-dots"></div>
       <div id="tutorial-body" class="tutorial-body"></div>
       <div class="tutorial-nav">
-        <button id="tut-prev" class="btn-tut-nav">← Anterior</button>
-        <button id="tut-next" class="btn-tut-nav btn-tut-next">Próximo →</button>
+        <button id="tut-prev" class="btn-tut-nav">Anterior</button>
+        <button id="tut-next" class="btn-tut-nav btn-tut-next">Próximo</button>
       </div>
     </div>
   </div>
 
   <!-- ===== BOTÃO TUTORIAL (fixo) ===== -->
-  <button id="btn-tutorial" class="btn-tutorial" aria-label="Abrir tutorial">?</button>
+  <button id="btn-tutorial" class="btn-tutorial" aria-label="Abrir tutorial">
+    <i data-lucide="help-circle" class="icon icon-tutorial"></i>
+  </button>
 
-  <!-- ===== AVISO PÓS-SALVAMENTO ===== -->
-  <div id="aviso-evidencia" class="aviso-evidencia hidden">
-    <div class="aviso-icone">✅</div>
-    <div class="aviso-texto"><strong>Baixa registrada!</strong></div>
-  </div>
+  <!-- ===== TOAST (notificações unificadas) ===== -->
+  <div id="toast" class="toast hidden"></div>
 
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

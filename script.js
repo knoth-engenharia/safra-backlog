@@ -15,6 +15,7 @@ const COL_OBS_EXEC = "OBS_EXEC";
 const COL_TECNICO = "TECNICO_EXEC";
 const COL_FOTO = "FOTO_EXEC";
 const COL_BAIXA_SITE = "BAIXA_SITE";
+const COL_SERIAIS_RET = "SERIAIS_RETIRADOS";
 
 const POR_PAGINA = 30;
 
@@ -32,14 +33,39 @@ const CODIGOS_QUEBRA = [
 ];
 
 // =========================================
-// UTILITÁRIOS DE FORMATAÇÃO
+// UTILITÁRIOS
 // =========================================
 function toTitleCase(str) {
   if (!str?.trim()) return str || "";
-  return str.trim()
+  return str
+    .trim()
     .replace(/\s+/g, " ")
     .toLowerCase()
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function parseDateBR(str) {
+  if (!str) return 0;
+  const m = str.match(/(\d{2})\/(\d{2})\/(\d{4})[\s,]+(\d{2}):(\d{2})/);
+  if (!m) return 0;
+  return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]).getTime();
+}
+
+function renderIcons() {
+  if (window.lucide) lucide.createIcons();
+}
+
+let _toastTimer = null;
+function mostrarToast(msg, tipo = "sucesso") {
+  const el = document.getElementById("toast");
+  if (!el) return;
+  clearTimeout(_toastTimer);
+  el.innerHTML = msg;
+  el.className = `toast toast-${tipo}`;
+  _toastTimer = setTimeout(() => {
+    el.classList.add("toast-saindo");
+    setTimeout(() => { el.className = "toast hidden"; }, 300);
+  }, tipo === "erro" ? 5000 : 3500);
 }
 
 // =========================================
@@ -105,11 +131,13 @@ async function tentarLogin() {
               .split(/[,;]/)
               .map((c) => c.trim())
               .filter(Boolean);
+      const adm = match["ADM"]?.trim().toUpperCase() === "SIM";
 
       salvarSessao({
         usuario: match["USUARIO"],
         nome: match["NOME"] || match["USUARIO"],
         cidades,
+        adm,
       });
       iniciarApp();
     } else {
@@ -155,11 +183,12 @@ function mapearContrato(linha, indice) {
     dataExec: linha[COL_DATA_EXEC] || "",
     obsExec: linha[COL_OBS_EXEC] || "",
     tecnicoExec: linha[COL_TECNICO] || "",
-    fotoExec:     linha[COL_FOTO] || "",
-    dataAgend:    linha["DATA"] || "",
-    horario:      linha["HORARIO"] || "",
+    fotoExec: linha[COL_FOTO] || "",
+    seriaisRet: linha[COL_SERIAIS_RET] || "",
+    dataAgend: linha["DATA"] || "",
+    horario: linha["HORARIO"] || "",
     tecnicoDesig: linha["TECNICO_DESIG"] || "",
-    status:       linha["STATUS"] || "Pendente",
+    status: linha["STATUS"] || "Pendente",
     _raw: linha,
   };
 }
@@ -175,6 +204,7 @@ let paginaAtual = 1;
 // INICIALIZAÇÃO
 // =========================================
 document.addEventListener("DOMContentLoaded", () => {
+  renderIcons();
   const tecnico = tecnicoLogado();
   if (tecnico) {
     iniciarApp();
@@ -198,8 +228,10 @@ function iniciarApp() {
   document.getElementById("tela-login").classList.add("hidden");
   document.getElementById("app-principal").classList.remove("hidden");
   document.getElementById("header-user").classList.remove("hidden");
-  document.getElementById("header-nome-tecnico").textContent =
-    `👤 ${tecnico.nome}`;
+  document.getElementById("header-nome-tecnico").textContent = tecnico.nome;
+  if (tecnico.adm) {
+    document.getElementById("btn-admin").classList.remove("hidden");
+  }
   document
     .getElementById("btn-logout")
     .addEventListener("click", encerrarSessao);
@@ -275,6 +307,7 @@ function salvarFiltros() {
     bairro: document.getElementById("filter-bairro").value,
     status: document.getElementById("filter-status").value,
     tipo: document.getElementById("filter-tipo").value,
+    tecnico: document.getElementById("filter-tecnico").value,
   };
   localStorage.setItem(FILTROS_KEY, JSON.stringify(f));
 }
@@ -286,8 +319,8 @@ function preencherFiltros() {
   const tipos = [
     ...new Set(contratos.map((c) => c.tipoDesconexao).filter(Boolean)),
   ].sort();
-  preencherSelect("filter-cidade", cidades, "Todas as cidades");
-  preencherSelect("filter-tipo", tipos, "Todos os tipos");
+  preencherSelect("filter-cidade", cidades, "CIDADE");
+  preencherSelect("filter-tipo", tipos, "TIPO");
 
   // Restaurar cidade salva antes de popular bairros
   const saved = lerFiltrosSalvos();
@@ -306,6 +339,23 @@ function preencherFiltros() {
   if (saved.bairro)
     document.getElementById("filter-bairro").value = saved.bairro;
 
+  // Filtro de técnico: visível apenas para ADMs
+  const { adm } = tecnicoLogado() || {};
+  if (adm) {
+    const tecnicos = [
+      ...new Set(
+        [
+          ...contratos.map((c) => c.tecnicoDesig),
+          ...contratos.map((c) => c.tecnicoExec),
+        ].filter(Boolean),
+      ),
+    ].sort();
+    preencherSelect("filter-tecnico", tecnicos, "TÉCNICO");
+    document.getElementById("filter-tecnico").classList.remove("hidden");
+    if (saved.tecnico)
+      document.getElementById("filter-tecnico").value = saved.tecnico;
+  }
+
   aplicarFiltros();
 }
 
@@ -317,7 +367,7 @@ function atualizarBairros() {
   const bairros = [
     ...new Set(fonte.map((c) => c.bairro).filter(Boolean)),
   ].sort();
-  preencherSelect("filter-bairro", bairros, "Todos os bairros");
+  preencherSelect("filter-bairro", bairros, "BAIRRO");
 }
 
 function preencherSelect(id, opcoes, placeholder) {
@@ -337,6 +387,7 @@ function limparFiltros() {
   document.getElementById("filter-bairro").value = "";
   document.getElementById("filter-status").value = "";
   document.getElementById("filter-tipo").value = "";
+  document.getElementById("filter-tecnico").value = "";
   atualizarBairros();
   atualizarBotaoLimparBusca();
   localStorage.removeItem(FILTROS_KEY);
@@ -351,11 +402,12 @@ function filtroAlterado() {
 }
 
 function aplicarFiltros() {
-  const busca  = document.getElementById("search").value.toLowerCase().trim();
+  const busca = document.getElementById("search").value.toLowerCase().trim();
   const cidade = document.getElementById("filter-cidade").value;
   const bairro = document.getElementById("filter-bairro").value;
   const status = document.getElementById("filter-status").value;
-  const tipo   = document.getElementById("filter-tipo").value;
+  const tipo = document.getElementById("filter-tipo").value;
+  const tecnico = document.getElementById("filter-tecnico").value;
 
   const resultado = contratos.filter((c) => {
     const novoEnd = extrairNovoEndereco(c.obs2) || "";
@@ -370,7 +422,8 @@ function aplicarFiltros() {
       (!cidade || c.cidade === cidade) &&
       (!bairro || c.bairro === bairro) &&
       (!status || c.status === status) &&
-      (!tipo   || c.tipoDesconexao === tipo)
+      (!tipo || c.tipoDesconexao === tipo) &&
+      (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico)
     );
   });
 
@@ -426,7 +479,7 @@ function extrairNovoEndereco(obs2) {
 // =========================================
 function renderizarLista(lista) {
   const container = document.getElementById("lista-contratos");
-  const contador  = document.getElementById("resultado-count");
+  const contador = document.getElementById("resultado-count");
 
   if (lista.length === 0) {
     contador.textContent = "0 contrato(s) encontrado(s)";
@@ -443,18 +496,18 @@ function renderizarLista(lista) {
     c.tecnicoDesig?.trim().toLowerCase() === usuario;
   const ehHoje = (c) => ehAgendado(c) && c.dataAgend?.trim() === hojeStr;
 
-  const agendadosHoje  = lista.filter(ehHoje);
+  const agendadosHoje = lista.filter(ehHoje);
   const outrosAgendados = lista.filter((c) => ehAgendado(c) && !ehHoje(c));
-  const outros          = lista.filter((c) => !ehAgendado(c));
-  const ordenada        = [...agendadosHoje, ...outrosAgendados, ...outros];
+  const outros = lista.filter((c) => !ehAgendado(c));
+  const ordenada = [...agendadosHoje, ...outrosAgendados, ...outros];
 
-  const total       = ordenada.length;
-  const totalPags   = Math.max(1, Math.ceil(total / POR_PAGINA));
+  const total = ordenada.length;
+  const totalPags = Math.max(1, Math.ceil(total / POR_PAGINA));
   if (paginaAtual > totalPags) paginaAtual = totalPags;
 
-  const inicio  = (paginaAtual - 1) * POR_PAGINA;
-  const pagina  = ordenada.slice(inicio, inicio + POR_PAGINA);
-  const fim     = Math.min(inicio + POR_PAGINA, total);
+  const inicio = (paginaAtual - 1) * POR_PAGINA;
+  const pagina = ordenada.slice(inicio, inicio + POR_PAGINA);
+  const fim = Math.min(inicio + POR_PAGINA, total);
 
   contador.textContent = `${total} contrato(s) — exibindo ${inicio + 1}–${fim}`;
 
@@ -465,11 +518,15 @@ function renderizarLista(lista) {
   });
 
   renderizarPaginacao(totalPags, total);
+  renderIcons();
 }
 
 function renderizarPaginacao(totalPags, total) {
   const div = document.getElementById("paginacao");
-  if (totalPags <= 1) { div.classList.add("hidden"); return; }
+  if (totalPags <= 1) {
+    div.classList.add("hidden");
+    return;
+  }
 
   div.classList.remove("hidden");
   div.innerHTML = `
@@ -488,21 +545,42 @@ function renderizarPaginacao(totalPags, total) {
     <button class="btn-pag" id="pag-next" ${paginaAtual >= totalPags ? "disabled" : ""}>→</button>`;
 
   document.getElementById("pag-prev").addEventListener("click", () => {
-    if (paginaAtual > 1) { paginaAtual--; aplicarFiltros(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+    if (paginaAtual > 1) {
+      paginaAtual--;
+      aplicarFiltros();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   });
   document.getElementById("pag-next").addEventListener("click", () => {
-    if (paginaAtual < totalPags) { paginaAtual++; aplicarFiltros(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+    if (paginaAtual < totalPags) {
+      paginaAtual++;
+      aplicarFiltros();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   });
 
   const input = document.getElementById("pag-input");
   // Só permite dígitos
   input.addEventListener("keydown", (e) => {
-    if (!/^\d$/.test(e.key) && !["Backspace","Delete","Tab","ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) {
+    if (
+      !/^\d$/.test(e.key) &&
+      ![
+        "Backspace",
+        "Delete",
+        "Tab",
+        "ArrowLeft",
+        "ArrowRight",
+        "ArrowUp",
+        "ArrowDown",
+      ].includes(e.key)
+    ) {
       e.preventDefault();
     }
     if (e.key === "Enter") irParaPagina(parseInt(input.value), totalPags);
   });
-  input.addEventListener("blur", () => irParaPagina(parseInt(input.value), totalPags));
+  input.addEventListener("blur", () =>
+    irParaPagina(parseInt(input.value), totalPags),
+  );
 }
 
 function irParaPagina(pag, totalPags) {
@@ -515,18 +593,20 @@ function irParaPagina(pag, totalPags) {
 }
 
 function criarCartaoHTML(c) {
-  const cls     = statusParaClasse(c.status);
+  const cls = statusParaClasse(c.status);
   const novoEnd = extrairNovoEndereco(c.obs2);
   const endExib = novoEnd || c.endereco;
-  const telExib = c.telefone || c.telCelular || c.telComercial || c.outros || "";
+  const telExib =
+    c.telefone || c.telCelular || c.telComercial || c.outros || "";
   const usuario = tecnicoLogado()?.usuario?.toLowerCase() || "";
-  const agendado = c.obs1?.trim().toUpperCase() === "AGENDADO" &&
-                   c.tecnicoDesig?.trim().toLowerCase() === usuario;
-  const hojeStr  = new Date().toLocaleDateString("pt-BR");
+  const agendado =
+    c.obs1?.trim().toUpperCase() === "AGENDADO" &&
+    c.tecnicoDesig?.trim().toLowerCase() === usuario;
+  const hojeStr = new Date().toLocaleDateString("pt-BR");
   const agendadoHoje = agendado && c.dataAgend?.trim() === hojeStr;
 
   const agendadoHeader = agendado
-    ? `<div class="cartao-agendado-header${agendadoHoje ? " cartao-agendado-hoje-header" : ""}">📅 ${agendadoHoje ? "HOJE" : "AGENDADO"} — ${c.dataAgend || ""}${c.horario ? ` às ${c.horario}` : ""}</div>`
+    ? `<div class="cartao-agendado-header${agendadoHoje ? " cartao-agendado-hoje-header" : ""}"><i data-lucide="calendar" class="icon icon-sm"></i> ${agendadoHoje ? "HOJE" : "AGENDADO"} — ${c.dataAgend || ""}${c.horario ? ` às ${c.horario}` : ""}</div>`
     : "";
 
   const dataExecHTML = c.dataExec
@@ -547,7 +627,7 @@ function criarCartaoHTML(c) {
         ${c.cidade} — ${c.bairro}<br/>
         <div class="end-row">
           <span>${novoEnd ? `<span class="tag-novo-end">Novo end.</span> ` : ""}${endExib}</span>
-          <a href="${mapsUrl}" class="btn-mapa-card" target="_blank" onclick="event.stopPropagation()" title="Ver no mapa">📍</a>
+          <a href="${mapsUrl}" class="btn-mapa-card" target="_blank" onclick="event.stopPropagation()" title="Ver no mapa"><i data-lucide="map-pin" class="icon icon-sm"></i></a>
         </div>
         ${telExib ? `<br/>${telExib}` : ""}
       </div>
@@ -586,7 +666,7 @@ function abrirModal(contrato) {
 
   const endParaMaps = novoEnd || contrato.endereco;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${endParaMaps}, ${contrato.cidade}`)}`;
-  const btnMaps = `<a href="${mapsUrl}" class="btn-mapa-modal" target="_blank">📍 Ver no Google Maps</a>`;
+  const btnMaps = `<a href="${mapsUrl}" class="btn-mapa-modal" target="_blank"><i data-lucide="map-pin" class="icon icon-sm"></i> Ver no Google Maps</a>`;
 
   body.innerHTML = `
     <div class="detalhe-titulo">${contrato.nome}</div>
@@ -618,6 +698,7 @@ function abrirModal(contrato) {
     <div class="acoes" id="acoes-modal">${criarAcoesHTML()}</div>`;
 
   document.getElementById("modal").classList.remove("hidden");
+  renderIcons();
 }
 
 function criarAcoesHTML() {
@@ -629,17 +710,30 @@ function criarAcoesHTML() {
 // --- Fluxo Retirado ---
 function mostrarConfirmacaoRetirado() {
   document.getElementById("acoes-modal").innerHTML = `
+    ${criarSeletorSeriaisHTML(contratoAtivo?.terminais || "")}
     <label class="detalhe-label" style="margin-bottom:6px;display:block">Observação (opcional)</label>
     <textarea id="obs-exec-input" class="obs-textarea" placeholder="Alguma observação sobre a retirada..."></textarea>
     ${criarInputFoto()}
     <button class="btn btn-retirado" onclick="confirmarRetirado()">Confirmar Retirado</button>
     <button class="btn btn-cancelar" onclick="restaurarAcoes()">Cancelar</button>`;
   configurarPreviewFotos();
+  renderIcons();
 }
 
 async function confirmarRetirado() {
+  const listaSer = parsearSeriais(contratoAtivo?.terminais || "");
+  if (listaSer.length > 0 && !getSeriaisSelecionados()) {
+    mostrarToast("Selecione ao menos um equipamento retirado.", "aviso");
+    return;
+  }
+  if (!validarFotos()) return;
+  const seriaisRet = getSeriaisSelecionados();
   await executarSalvamento(
-    { STATUS: "Retirado", [COL_CODIGO_OS]: "430 - Equipamento retirado" },
+    {
+      STATUS: "Retirado",
+      [COL_CODIGO_OS]: "430 - Equipamento retirado",
+      [COL_SERIAIS_RET]: seriaisRet,
+    },
     "Retirado",
   );
 }
@@ -660,14 +754,17 @@ function mostrarSeletorQuebra() {
     <button class="btn btn-quebra"   onclick="confirmarQuebra()">Confirmar Quebra</button>
     <button class="btn btn-cancelar" onclick="restaurarAcoes()">Cancelar</button>`;
   configurarPreviewFotos();
+  renderIcons();
 }
 
 async function confirmarQuebra() {
   const select = document.getElementById("select-codigo-quebra");
   if (!select?.value) {
+    mostrarToast("Selecione o motivo da quebra.", "aviso");
     select.style.borderColor = "#ef4444";
     return;
   }
+  if (!validarFotos()) return;
   await executarSalvamento(
     { STATUS: "Quebra", [COL_CODIGO_OS]: select.value },
     "Quebra",
@@ -676,6 +773,7 @@ async function confirmarQuebra() {
 
 function restaurarAcoes() {
   document.getElementById("acoes-modal").innerHTML = criarAcoesHTML();
+  renderIcons();
 }
 
 // --- Salvamento ---
@@ -722,15 +820,17 @@ async function executarSalvamento(camposBase, novoStatus) {
         dataExec,
         tecnicoExec: tecnico,
         fotoExec,
+        seriaisRet: camposBase[COL_SERIAIS_RET] || contratos[idx].seriaisRet,
+        baixaSite: "Sim",
       };
     }
 
     fecharModal();
-    mostrarAvisoEvidencias();
+    mostrarToast("Baixa registrada com sucesso.", "sucesso");
     aplicarFiltros();
   } catch (erro) {
     console.error("Erro ao salvar:", erro);
-    alert("Erro ao salvar. Tente novamente.");
+    mostrarToast("Erro ao salvar. Verifique sua conexão e tente novamente.", "erro");
     btns.forEach((b) => (b.disabled = false));
   }
 }
@@ -780,8 +880,8 @@ function criarBotoesPhone(c) {
       <div class="phone-item">
         <span class="phone-label">${label}: <strong>${valor}</strong></span>
         <div class="phone-btns">
-          <a href="tel:+${digits}" class="btn-phone btn-ligar">📞 Ligar</a>
-          <a href="https://wa.me/${intl}?text=${msg}" class="btn-phone btn-whats" target="_blank">💬 WhatsApp</a>
+          <a href="tel:+${digits}" class="btn-phone btn-ligar"><i data-lucide="phone" class="icon icon-sm"></i> Ligar</a>
+          <a href="https://wa.me/${intl}?text=${msg}" class="btn-phone btn-whats" target="_blank"><i data-lucide="message-circle" class="icon icon-sm"></i> WhatsApp</a>
         </div>
       </div>`;
     })
@@ -821,10 +921,10 @@ async function uploadTodasFotos(input) {
 function criarInputFoto() {
   return `
     <label class="detalhe-label" style="margin:10px 0 6px;display:block">
-      Fotos de evidência (opcional)
+      Fotos de evidência
     </label>
     <label class="btn-foto-label">
-      📷 Selecionar fotos
+      <i data-lucide="camera" class="icon icon-sm"></i> Selecionar fotos
       <input type="file" id="foto-input" accept="image/*" multiple class="foto-input-hidden" />
     </label>
     <div id="foto-preview" class="foto-preview"></div>`;
@@ -861,24 +961,70 @@ function criarFotosModal(fotoExec) {
 }
 
 // =========================================
+// VALIDAÇÃO DE FOTOS + SELEÇÃO DE SERIAIS
+// =========================================
+function validarFotos() {
+  const fotoInput = document.getElementById("foto-input");
+  if (!fotoInput?.files?.length) {
+    mostrarToast("Anexe ao menos uma foto de evidência.", "aviso");
+    return false;
+  }
+  return true;
+}
+
+function criarSeletorSeriaisHTML(terminais) {
+  const lista = parsearSeriais(terminais);
+  if (!lista.length) return "";
+  const chips = lista
+    .map(
+      (s) =>
+        `<span class="serial-chip serial-selec" data-serial="${s}" onclick="toggleSerial(this)">${s}</span>`,
+    )
+    .join("");
+  return `<div class="detalhe-campo" style="margin-bottom:14px">
+    <span class="detalhe-label">Equipamentos retirados — toque para selecionar</span>
+    <button type="button" class="btn-sel-todos" onclick="selecionarTodosSeriais()">Selecionar todos</button>
+    <div class="seriais-lista" id="seriais-selec">${chips}</div>
+  </div>`;
+}
+
+function toggleSerial(el) {
+  el.classList.toggle("serial-selecionado");
+}
+
+function selecionarTodosSeriais() {
+  document
+    .querySelectorAll("#seriais-selec .serial-selec")
+    .forEach((el) => el.classList.add("serial-selecionado"));
+}
+
+function getSeriaisSelecionados() {
+  return Array.from(
+    document.querySelectorAll("#seriais-selec .serial-selecionado"),
+  )
+    .map((el) => el.dataset.serial)
+    .join(" / ");
+}
+
+// =========================================
 // TUTORIAL
 // =========================================
 const TUTORIAL_PASSOS = [
   {
-    icone: "👋",
+    lucideIcon: "sparkles",
     titulo: "Bem-vindo ao Backlog Safra",
     texto: `Este sistema mostra os contratos de retirada de equipamentos da Claro.<br/><br/>
             Só você e sua equipe têm acesso. Qualquer atualização feita aqui é salva automaticamente na planilha.`,
   },
   {
-    icone: "🔍",
+    lucideIcon: "search",
     titulo: "Busca e Filtros",
     texto: `Use a <strong>barra de busca</strong> para encontrar um cliente pelo nome, número do contrato ou endereço.<br/><br/>
             Use os <strong>filtros</strong> abaixo para refinar por cidade, bairro, status e tipo de desconexão.<br/><br/>
             O botão <strong>"Limpar filtros"</strong> reseta tudo de uma vez. Os filtros ficam salvos entre sessões.`,
   },
   {
-    icone: "🃏",
+    lucideIcon: "layout-list",
     titulo: "Entendendo os Cartões",
     texto: `Cada cartão é um contrato. A <strong>cor da borda esquerda</strong> indica o status:<br/><br/>
             🟡 <strong>Amarelo</strong> — Pendente (ainda não atendido)<br/>
@@ -887,7 +1033,7 @@ const TUTORIAL_PASSOS = [
             Se houver um novo endereço em OBS 2, ele aparece no cartão com a tag <em>"Novo end."</em>`,
   },
   {
-    icone: "📋",
+    lucideIcon: "file-text",
     titulo: "Detalhes do Contrato",
     texto: `Toque em qualquer cartão para ver <strong>todos os detalhes</strong>:<br/><br/>
             • Endereço completo e novo endereço (se houver)<br/>
@@ -897,7 +1043,7 @@ const TUTORIAL_PASSOS = [
             • Histórico de execução (quem fez, quando, código OS)`,
   },
   {
-    icone: "📞",
+    lucideIcon: "phone",
     titulo: "Ligar e enviar WhatsApp",
     texto: `Dentro dos detalhes, para cada telefone cadastrado aparecem dois botões:<br/><br/>
             📞 <strong>Ligar</strong> — abre o discador do celular diretamente<br/>
@@ -905,7 +1051,7 @@ const TUTORIAL_PASSOS = [
             Basta tocar em <em>Enviar</em> no WhatsApp.`,
   },
   {
-    icone: "✅",
+    lucideIcon: "check-circle",
     titulo: "Marcar como Retirado",
     texto: `Quando conseguir retirar o equipamento:<br/><br/>
             1. Abra o contrato<br/>
@@ -916,7 +1062,7 @@ const TUTORIAL_PASSOS = [
             O status é atualizado na planilha automaticamente com data, hora e seu nome.`,
   },
   {
-    icone: "❌",
+    lucideIcon: "x-circle",
     titulo: "Marcar como Quebra",
     texto: `Se não for possível retirar o equipamento:<br/><br/>
             1. Abra o contrato<br/>
@@ -927,7 +1073,7 @@ const TUTORIAL_PASSOS = [
             ⚠️ Escolha o motivo certo — isso alimenta os relatórios do supervisor.`,
   },
   {
-    icone: "📸",
+    lucideIcon: "camera",
     titulo: "Enviando Evidências",
     texto: `Ao confirmar uma baixa (retirado ou quebra), você pode <strong>anexar fotos</strong> diretamente pelo site.<br/><br/>
             As fotos ficam salvas na nuvem e qualquer pessoa com acesso ao sistema pode ver.<br/><br/>
@@ -963,9 +1109,10 @@ function renderizarPasso() {
 
   // Conteúdo
   document.getElementById("tutorial-body").innerHTML = `
-    <div class="tut-icone">${passo.icone}</div>
+    <div class="tut-icone"><i data-lucide="${passo.lucideIcon}" class="icon icon-tut-grande"></i></div>
     <div class="tut-titulo">${passo.titulo}</div>
     <div class="tut-texto">${passo.texto}</div>`;
+  renderIcons();
 
   // Botões
   const prev = document.getElementById("tut-prev");
@@ -997,18 +1144,244 @@ function mostrarCarregando() {
   document.getElementById("resultado-count").textContent =
     "Carregando contratos...";
   document.getElementById("lista-contratos").innerHTML =
-    `<div class="estado-vazio"><div class="icone">⏳</div><p>Buscando contratos na planilha...</p></div>`;
+    `<div class="estado-vazio"><div class="icone"><i data-lucide="loader" class="icon icon-estado"></i></div><p>Buscando contratos na planilha...</p></div>`;
+  renderIcons();
 }
 
 function mostrarErro(msg) {
   document.getElementById("resultado-count").textContent = "Erro ao carregar";
   document.getElementById("lista-contratos").innerHTML =
-    `<div class="estado-erro"><p>⚠️ ${msg}</p><button class="btn-tentar-novamente" onclick="carregarContratos()">Tentar novamente</button></div>`;
+    `<div class="estado-erro"><p><i data-lucide="alert-triangle" class="icon icon-sm"></i> ${msg}</p><button class="btn-tentar-novamente" onclick="carregarContratos()">Tentar novamente</button></div>`;
+  renderIcons();
 }
 
 function mostrarVazio(msg) {
   document.getElementById("lista-contratos").innerHTML =
-    `<div class="estado-vazio"><div class="icone">📋</div><p>${msg}</p></div>`;
+    `<div class="estado-vazio"><div class="icone"><i data-lucide="clipboard-list" class="icon icon-estado"></i></div><p>${msg}</p></div>`;
+  renderIcons();
+}
+
+// =========================================
+// PAINEL ADMINISTRATIVO
+// =========================================
+let adminTabAtiva = "metricas";
+
+function abrirAdmin() {
+  document.getElementById("app-principal").classList.add("hidden");
+  document.getElementById("tela-admin").classList.remove("hidden");
+  preencherFiltrosAdmin();
+  renderizarAdmin();
+}
+
+function voltarLista() {
+  document.getElementById("tela-admin").classList.add("hidden");
+  document.getElementById("app-principal").classList.remove("hidden");
+}
+
+function mudarTabAdmin(tab) {
+  adminTabAtiva = tab;
+  document.querySelectorAll(".admin-tab").forEach((btn) => {
+    btn.classList.toggle("admin-tab-ativo", btn.dataset.tab === tab);
+  });
+  renderizarAdmin();
+}
+
+function preencherFiltrosAdmin() {
+  const cidades = [
+    ...new Set(contratos.map((c) => c.cidade).filter(Boolean)),
+  ].sort();
+  const tecnicos = [
+    ...new Set(
+      [
+        ...contratos.map((c) => c.tecnicoDesig),
+        ...contratos.map((c) => c.tecnicoExec),
+      ].filter(Boolean),
+    ),
+  ].sort();
+  preencherSelect("adm-filter-cidade", cidades, "CIDADE");
+  preencherSelect("adm-filter-tecnico", tecnicos, "TÉCNICO");
+}
+
+function getContratosAdmin() {
+  const cidade = document.getElementById("adm-filter-cidade").value;
+  const tecnico = document.getElementById("adm-filter-tecnico").value;
+  return contratos.filter(
+    (c) =>
+      (!cidade || c.cidade === cidade) &&
+      (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico),
+  );
+}
+
+function renderizarAdmin() {
+  const lista = getContratosAdmin();
+  const conteudo = document.getElementById("admin-conteudo");
+  if (adminTabAtiva === "metricas")
+    conteudo.innerHTML = renderizarMetricasHTML(lista);
+  else if (adminTabAtiva === "historico")
+    conteudo.innerHTML = renderizarHistoricoHTML(lista);
+  else if (adminTabAtiva === "relatorio")
+    conteudo.innerHTML = renderizarRelatorioHTML();
+  renderIcons();
+}
+
+function renderizarMetricasHTML(lista) {
+  const total = lista.length;
+  const retirados = lista.filter((c) => c.status === "Retirado").length;
+  const quebras = lista.filter((c) => c.status === "Quebra").length;
+  const pendentes = lista.filter((c) => c.status === "Pendente").length;
+  const taxa = total > 0 ? Math.round((retirados / total) * 100) : 0;
+
+  const cidades = [...new Set(lista.map((c) => c.cidade))].sort();
+  const linhasCidade = cidades
+    .map((cidade) => {
+      const cx = lista.filter((c) => c.cidade === cidade);
+      const r = cx.filter((c) => c.status === "Retirado").length;
+      const q = cx.filter((c) => c.status === "Quebra").length;
+      const p = cx.filter((c) => c.status === "Pendente").length;
+      return `<tr><td>${cidade}</td><td class="num-pendente">${p}</td><td class="num-retirado">${r}</td><td class="num-quebra">${q}</td><td>${cx.length}</td></tr>`;
+    })
+    .join("");
+
+  const tecnicos = [
+    ...new Set(lista.map((c) => c.tecnicoExec).filter(Boolean)),
+  ].sort();
+  const linhasTecnico = tecnicos
+    .map((tec) => {
+      const tx = lista.filter((c) => c.tecnicoExec === tec);
+      const r = tx.filter((c) => c.status === "Retirado").length;
+      const q = tx.filter((c) => c.status === "Quebra").length;
+      return `<tr><td>${tec}</td><td class="num-retirado">${r}</td><td class="num-quebra">${q}</td><td>${tx.length}</td></tr>`;
+    })
+    .join("");
+
+  return `
+    <div class="metricas-resumo">
+      <div class="metrica-card"><div class="metrica-num">${total}</div><div class="metrica-label">Total</div></div>
+      <div class="metrica-card metrica-pendente"><div class="metrica-num">${pendentes}</div><div class="metrica-label">Pendentes</div></div>
+      <div class="metrica-card metrica-retirado"><div class="metrica-num">${retirados}</div><div class="metrica-label">Retirados</div></div>
+      <div class="metrica-card metrica-quebra"><div class="metrica-num">${quebras}</div><div class="metrica-label">Quebras</div></div>
+      <div class="metrica-card metrica-taxa"><div class="metrica-num">${taxa}%</div><div class="metrica-label">Conclusão</div></div>
+    </div>
+
+    <div class="admin-secao">
+      <h3 class="admin-secao-titulo">Por Cidade</h3>
+      <div class="tabela-scroll">
+        <table class="admin-table">
+          <thead><tr><th>Cidade</th><th>Pendente</th><th>Retirado</th><th>Quebra</th><th>Total</th></tr></thead>
+          <tbody>${linhasCidade || '<tr><td colspan="5" class="tabela-vazia">Nenhum dado</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+
+    ${
+      tecnicos.length
+        ? `
+    <div class="admin-secao">
+      <h3 class="admin-secao-titulo">Por Técnico (Execução)</h3>
+      <div class="tabela-scroll">
+        <table class="admin-table">
+          <thead><tr><th>Técnico</th><th>Retirado</th><th>Quebra</th><th>Total baixas</th></tr></thead>
+          <tbody>${linhasTecnico}</tbody>
+        </table>
+      </div>
+    </div>`
+        : ""
+    }`;
+}
+
+function renderizarHistoricoHTML(lista) {
+  const baixas = lista
+    .filter((c) => c.status === "Retirado" || c.status === "Quebra")
+    .sort((a, b) => parseDateBR(b.dataExec) - parseDateBR(a.dataExec));
+
+  if (!baixas.length) {
+    return `<div class="estado-vazio"><div class="icone">📋</div><p>Nenhuma baixa encontrada com os filtros selecionados.</p></div>`;
+  }
+
+  const linhas = baixas
+    .map((c) => {
+      const cls = statusParaClasse(c.status);
+      return `<tr>
+        <td>${c.contrato}</td>
+        <td>${c.nome}</td>
+        <td>${c.cidade}</td>
+        <td><span class="badge-status badge-${cls} badge-sm">${c.status}</span></td>
+        <td>${c.tecnicoExec || "—"}</td>
+        <td class="col-data">${c.dataExec || "—"}</td>
+      </tr>`;
+    })
+    .join("");
+
+  return `
+    <div class="admin-secao">
+      <p class="historico-count">${baixas.length} baixa(s) encontrada(s)</p>
+      <div class="tabela-scroll">
+        <table class="admin-table">
+          <thead><tr><th>Contrato</th><th>Nome</th><th>Cidade</th><th>Status</th><th>Técnico</th><th>Data Exec.</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderizarRelatorioHTML() {
+  return `
+    <div class="admin-secao">
+      <h3 class="admin-secao-titulo">Exportar Relatório</h3>
+      <p class="relatorio-desc">
+        Exporta todos os contratos conforme os filtros acima em formato CSV (compatível com Excel).
+        Inclui status, técnico responsável, data de execução e demais campos.
+      </p>
+      <button class="btn btn-relatorio" onclick="baixarCSV()"><i data-lucide="download" class="icon icon-sm"></i> Baixar CSV</button>
+    </div>`;
+}
+
+function baixarCSV() {
+  const lista = getContratosAdmin();
+  const cabecalho = [
+    "Contrato",
+    "Nome",
+    "Cidade",
+    "Bairro",
+    "Endereço",
+    "Status",
+    "Código OS",
+    "Técnico Designado",
+    "Técnico Exec.",
+    "Data Exec.",
+    "Obs. Execução",
+    "Baixa pelo Site",
+    "Seriais Retirados",
+  ].join(";");
+
+  const linhas = lista.map((c) =>
+    [
+      c.contrato,
+      c.nome,
+      c.cidade,
+      c.bairro,
+      c.endereco,
+      c.status,
+      c.codigoOS,
+      c.tecnicoDesig,
+      c.tecnicoExec,
+      c.dataExec,
+      c.obsExec,
+      c.baixaSite,
+      c.seriaisRet,
+    ]
+      .map((v) => `"${(v || "").replace(/"/g, '""')}"`)
+      .join(";"),
+  );
+
+  const csv = [cabecalho, ...linhas].join("\n");
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `backlog-safra-${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // =========================================
@@ -1033,9 +1406,18 @@ function configurarEventos() {
     atualizarBairros();
     filtroAlterado();
   });
-  document.getElementById("filter-bairro").addEventListener("change", filtroAlterado);
-  document.getElementById("filter-status").addEventListener("change", filtroAlterado);
-  document.getElementById("filter-tipo").addEventListener("change", filtroAlterado);
+  document
+    .getElementById("filter-bairro")
+    .addEventListener("change", filtroAlterado);
+  document
+    .getElementById("filter-status")
+    .addEventListener("change", filtroAlterado);
+  document
+    .getElementById("filter-tipo")
+    .addEventListener("change", filtroAlterado);
+  document
+    .getElementById("filter-tecnico")
+    .addEventListener("change", filtroAlterado);
   document
     .getElementById("btn-limpar-filtros")
     .addEventListener("click", limparFiltros);
@@ -1045,6 +1427,21 @@ function configurarEventos() {
   document.getElementById("modal").addEventListener("click", (e) => {
     if (e.target.id === "modal") fecharModal();
   });
+
+  // Admin
+  document.getElementById("btn-admin").addEventListener("click", abrirAdmin);
+  document
+    .getElementById("btn-voltar-lista")
+    .addEventListener("click", voltarLista);
+  document.querySelectorAll(".admin-tab").forEach((btn) => {
+    btn.addEventListener("click", () => mudarTabAdmin(btn.dataset.tab));
+  });
+  document
+    .getElementById("adm-filter-cidade")
+    .addEventListener("change", renderizarAdmin);
+  document
+    .getElementById("adm-filter-tecnico")
+    .addEventListener("change", renderizarAdmin);
 
   // Tutorial
   document
