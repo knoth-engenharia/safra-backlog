@@ -235,8 +235,30 @@ function salvarCacheGeocode(cache) {
   } catch {}
 }
 
+// Expande abreviações comuns em endereços brasileiros (com e sem ponto)
+function expandirAbreviaturas(end) {
+  // Padrão: prefixo (com ou sem ponto) seguido de espaço e letra
+  const sub = (re, rep) => end.replace(re, rep);
+  end = sub(/\bR\.?\s+(?=[A-ZÀ-ÿ])/gi, "Rua ");
+  end = sub(/\bAV\.?\s+(?=[A-ZÀ-ÿ])/gi, "Avenida ");
+  end = sub(/\bAL\.?\s+(?=[A-ZÀ-ÿ])/gi, "Alameda ");
+  end = sub(/\bTV\.?\s+(?=[A-ZÀ-ÿ])/gi, "Travessa ");
+  end = sub(/\bTRAV\.?\s+(?=[A-ZÀ-ÿ])/gi, "Travessa ");
+  end = sub(/\bPC\.?\s+(?=[A-ZÀ-ÿ])/gi, "Praça ");
+  end = sub(/\bPCA\.?\s+(?=[A-ZÀ-ÿ])/gi, "Praça ");
+  end = sub(/\bEST\.?\s+(?=[A-ZÀ-ÿ])/gi, "Estrada ");
+  end = sub(/\bROD\.?\s+(?=[A-ZÀ-ÿ])/gi, "Rodovia ");
+  end = sub(/\bCONJ\.?\s+(?=[A-ZÀ-ÿ])/gi, "Conjunto ");
+  return end;
+}
+
+// Remove sufixo "- BAIRRO" comum em dados de telecom: "Rua X, 123 - Jardim Y"
+function limparSufixoBairro(end) {
+  return end.replace(/\s*-\s*[^,]+$/, "").trim();
+}
+
+// Chave de cache usa só a rua (sem número) para maximizar reuso
 function enderecoParaChaveGeocode(endereco, cidade) {
-  // Remove house number to maximise cache hits across similar addresses
   const rua = endereco
     .replace(/,?\s*n[ºo°]?\s*\d+.*/i, "")
     .replace(/,?\s*\d+\s*$/, "")
@@ -244,27 +266,49 @@ function enderecoParaChaveGeocode(endereco, cidade) {
   return `${rua}, ${cidade}`.toLowerCase();
 }
 
+// Throttle: Nominatim exige no máximo 1 req/segundo
+let _geocodeLastTs = 0;
+async function _geocodeFetch(url) {
+  const agora = Date.now();
+  const espera = Math.max(0, _geocodeLastTs + 1150 - agora);
+  if (espera > 0) await new Promise((r) => setTimeout(r, espera));
+  _geocodeLastTs = Date.now();
+  return fetch(url, {
+    headers: {
+      "Accept-Language": "pt-BR,pt",
+      "User-Agent": "BacklogSafra/1.0 (internal)",
+    },
+  });
+}
+
 async function geocodificarEndereco(endereco, cidade) {
   const cache = lerCacheGeocode();
   const chave = enderecoParaChaveGeocode(endereco, cidade);
   if (cache[chave]) return cache[chave];
-  try {
-    const query = encodeURIComponent(`${chave}, Brasil`);
-    const resp = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1&countrycodes=br`,
-      {
-        headers: {
-          "Accept-Language": "pt-BR,pt",
-          "User-Agent": "BacklogSafra/1.0 (internal)",
-        },
-      },
+
+  // Limpa e expande o endereço antes de consultar
+  const endLimpo = expandirAbreviaturas(limparSufixoBairro(endereco));
+
+  // Tentativa 1: endereço completo com número + cidade
+  const q1 = encodeURIComponent(`${endLimpo}, ${cidade}, Brasil`);
+  // Tentativa 2: só rua sem número + cidade (fallback)
+  const ruaSemNumero = endLimpo.replace(/,?\s*\d+.*$/, "").trim();
+  const q2 = encodeURIComponent(`${ruaSemNumero}, ${cidade}, Brasil`);
+
+  async function tentarGeocode(q) {
+    const resp = await _geocodeFetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=1&countrycodes=br`,
     );
     const json = await resp.json();
-    if (json.length > 0) {
-      const coords = {
-        lat: parseFloat(json[0].lat),
-        lng: parseFloat(json[0].lon),
-      };
+    return json.length > 0
+      ? { lat: parseFloat(json[0].lat), lng: parseFloat(json[0].lon) }
+      : null;
+  }
+
+  try {
+    let coords = await tentarGeocode(q1);
+    if (!coords) coords = await tentarGeocode(q2);
+    if (coords) {
       cache[chave] = coords;
       salvarCacheGeocode(cache);
       return coords;
@@ -283,6 +327,10 @@ function ativarLocalizacao() {
     btn.disabled = true;
     btn.textContent = "Localizando...";
   }
+
+  // Limpa cache de geocoding para reprocessar com o novo formato de query
+  try { sessionStorage.removeItem(GEOCODE_CACHE_KEY); } catch {}
+  contratoDistancias.clear();
 
   navigator.geolocation.getCurrentPosition(
     (pos) => {
