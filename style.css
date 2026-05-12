@@ -757,6 +757,9 @@ body {
 }
 
 .cartao-agendado-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.78rem;
   font-weight: 700;
   color: #92400e;
@@ -772,6 +775,29 @@ body {
   background: #f59e0b;
   color: white;
   border-bottom-color: #d97706;
+}
+.cartao-agendado-amanha-header {
+  background: #fbbf24;
+  color: #78350f;
+  border-bottom-color: #f59e0b;
+}
+.agend-label-dia {
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+.agend-data {
+  opacity: 0.85;
+  font-weight: 600;
+}
+.agend-hora {
+  margin-left: auto;
+  font-size: 0.85rem;
+  font-weight: 800;
+  background: rgba(0,0,0,0.1);
+  padding: 1px 7px;
+  border-radius: 20px;
 }
 
 /* Linha de endereço com botão de mapa */

@@ -4,7 +4,7 @@
 // URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
 // Ver instruções em gas/Codigo.gs
 const GAS_URL =
-  "https://script.google.com/macros/s/AKfycbwPU73KqkumDOZ86CJuXfRxEoYzk_nThbIBJKRwhzJ9VZ9PaH6Vvr_neLG4sBl-Fo15/exec";
+  "https://script.google.com/macros/s/AKfycbyL-0-fXKLi8VF3xmzA_u2C4RJ0x4mnrvLhj6GGcXPWdgaNqt7L9-KMHGiWXMNqgJgW/exec";
 
 // Chave gratuita do ImgBB — obter em: https://api.imgbb.com
 // Criar conta, gerar chave API e colar aqui
@@ -1010,11 +1010,26 @@ async function carregarContratos() {
     contratos = dados.map(mapearContrato);
 
     // Restringe cidades conforme permissão do técnico logado
-    const { cidades, usuario } = tecnicoLogado() || {};
+    // Exceto: contrato agendado para este técnico (TECNICO_DESIG) aparece sempre
+    const { cidades, usuario, adm } = tecnicoLogado() || {};
+    const usuarioLow = usuario?.trim().toLowerCase() || "";
+    const ehAgendadoParaMim = (c) =>
+      c.obs1?.trim().toUpperCase() === "AGENDADO" &&
+      c.tecnicoDesig?.trim().toLowerCase() === usuarioLow;
     if (cidades) {
       const permitidas = cidades.map((c) => c.toLowerCase());
-      contratos = contratos.filter((c) =>
-        permitidas.includes(c.cidade.toLowerCase()),
+      contratos = contratos.filter(
+        (c) =>
+          permitidas.includes(c.cidade.toLowerCase()) ||
+          (!adm && ehAgendadoParaMim(c)),
+      );
+    }
+    // Oculta contratos de "outro endereço" para técnicos (não ADMs)
+    if (!adm) {
+      contratos = contratos.filter(
+        (c) =>
+          c.obs1?.trim().toUpperCase() !==
+          "CLIENTE SOLICITA RETIRADA EM OUTRO ENDEREÇO",
       );
     }
 
@@ -1248,6 +1263,13 @@ function aplicarFiltros() {
   const periodo = document.getElementById("filter-periodo")?.value || "";
   const distFiltro = document.getElementById("filter-distancia")?.value || "";
 
+  const { usuario: usuarioLogado, adm: isAdm } = tecnicoLogado() || {};
+  const usuarioLow = usuarioLogado?.trim().toLowerCase() || "";
+  const ehMeuAgendamento = (c) =>
+    !isAdm &&
+    c.obs1?.trim().toUpperCase() === "AGENDADO" &&
+    c.tecnicoDesig?.trim().toLowerCase() === usuarioLow;
+
   const resultado = contratos.filter((c) => {
     const novoEnd = extrairNovoEndereco(c.obs2) || "";
     const matchBusca =
@@ -1256,10 +1278,12 @@ function aplicarFiltros() {
       c.contrato.toLowerCase().includes(busca) ||
       c.endereco.toLowerCase().includes(busca) ||
       novoEnd.toLowerCase().includes(busca);
+    // Agendamentos do próprio técnico ignoram filtro de cidade e bairro
+    const skipGeofiltro = ehMeuAgendamento(c);
     return (
       matchBusca &&
-      (!cidade || c.cidade === cidade) &&
-      (!bairro || c.bairro === bairro) &&
+      (skipGeofiltro || (!cidade || c.cidade === cidade)) &&
+      (skipGeofiltro || (!bairro || c.bairro === bairro)) &&
       (!status || c.status === status) &&
       (!tipo || c.tipoDesconexao === tipo) &&
       (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico) &&
@@ -1340,7 +1364,7 @@ function renderizarLista(lista) {
       return da - db;
     });
   } else {
-    // Ordem padrão: agendados hoje → outros agendados → Pendente → Parcial → Quebra → Retirado
+    // Ordem padrão: agendados (mais próximo primeiro) → Pendente → Parcial → Quebra → Retirado
     const STATUS_ORDEM = {
       Pendente: 0,
       Parcial: 1,
@@ -1349,19 +1373,24 @@ function renderizarLista(lista) {
       Retirado: 3,
     };
     const usuario = tecnicoLogado()?.usuario?.toLowerCase() || "";
-    const hojeStr = new Date().toLocaleDateString("pt-BR");
     const ehAgendado = (c) =>
       c.obs1?.trim().toUpperCase() === "AGENDADO" &&
       c.tecnicoDesig?.trim().toLowerCase() === usuario;
-    const ehHoje = (c) => ehAgendado(c) && c.dataAgend?.trim() === hojeStr;
-    const agendadosHoje = lista.filter(ehHoje);
-    const outrosAgendados = lista.filter((c) => ehAgendado(c) && !ehHoje(c));
+    const parseDateTimeAgend = (c) => {
+      const m = c.dataAgend?.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      if (!m) return Infinity;
+      const hm = c.horario?.match(/(\d{1,2})[h:](\d{2})/i);
+      return new Date(+m[3], +m[2] - 1, +m[1], hm ? +hm[1] : 23, hm ? +hm[2] : 59).getTime();
+    };
+    const agendados = lista
+      .filter(ehAgendado)
+      .sort((a, b) => parseDateTimeAgend(a) - parseDateTimeAgend(b));
     const outros = lista
       .filter((c) => !ehAgendado(c))
       .sort(
         (a, b) => (STATUS_ORDEM[a.status] ?? 2) - (STATUS_ORDEM[b.status] ?? 2),
       );
-    ordenada = [...agendadosHoje, ...outrosAgendados, ...outros];
+    ordenada = [...agendados, ...outros];
   }
 
   const total = ordenada.length;
@@ -1531,10 +1560,32 @@ function criarCartaoHTML(c) {
     c.obs1?.trim().toUpperCase() === "AGENDADO" &&
     c.tecnicoDesig?.trim().toLowerCase() === usuario;
   const hojeStr = new Date().toLocaleDateString("pt-BR");
+  const amanhaDate = new Date(); amanhaDate.setDate(amanhaDate.getDate() + 1);
+  const amanhaStr = amanhaDate.toLocaleDateString("pt-BR");
   const agendadoHoje = agendado && c.dataAgend?.trim() === hojeStr;
+  const agendadoAmanha = agendado && c.dataAgend?.trim() === amanhaStr;
+
+  const labelDia = (() => {
+    if (!agendado) return "";
+    if (agendadoHoje) return "HOJE";
+    if (agendadoAmanha) return "AMANHÃ";
+    const m = c.dataAgend?.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) {
+      const d = new Date(+m[3], +m[2] - 1, +m[1]);
+      const dia = d.toLocaleDateString("pt-BR", { weekday: "short" })
+        .replace(".", "").toUpperCase();
+      return dia;
+    }
+    return "AGENDADO";
+  })();
 
   const agendadoHeader = agendado
-    ? `<div class="cartao-agendado-header${agendadoHoje ? " cartao-agendado-hoje-header" : ""}"><i data-lucide="calendar" class="icon icon-sm"></i> ${agendadoHoje ? "HOJE" : "AGENDADO"} — ${escHtml(c.dataAgend || "")}${c.horario ? ` às ${escHtml(c.horario)}` : ""}</div>`
+    ? `<div class="cartao-agendado-header${agendadoHoje ? " cartao-agendado-hoje-header" : agendadoAmanha ? " cartao-agendado-amanha-header" : ""}">
+        <i data-lucide="calendar" class="icon icon-sm"></i>
+        <span class="agend-label-dia">${labelDia}</span>
+        <span class="agend-data">${escHtml(c.dataAgend || "")}</span>
+        ${c.horario ? `<span class="agend-hora">às ${escHtml(c.horario)}</span>` : ""}
+      </div>`
     : "";
 
   const dataExecHTML = c.dataExec
@@ -1761,7 +1812,8 @@ function marcarNoConnect() {
   const tr = document.querySelector(`.hist-linha[data-id="${id}"]`);
   if (tr) {
     const cell = tr.querySelector(".col-connect");
-    if (cell) cell.innerHTML = `<span class="badge-connect-ok" title="Lançado no Connect">✓</span>`;
+    if (cell)
+      cell.innerHTML = `<span class="badge-connect-ok" title="Lançado no Connect">✓</span>`;
   }
 
   mostrarToast("Lançado no Connect!", "sucesso");
@@ -1774,7 +1826,8 @@ function marcarNoConnect() {
       `<button class="btn-marcar-connect" onclick="marcarNoConnect()"><i data-lucide="check" class="icon icon-sm"></i> Marcar como lançado no Connect</button>`;
     if (tr) {
       const cell = tr.querySelector(".col-connect");
-      if (cell) cell.innerHTML = `<span class="badge-connect-pendente" title="Pendente no Connect">—</span>`;
+      if (cell)
+        cell.innerHTML = `<span class="badge-connect-pendente" title="Pendente no Connect">—</span>`;
     }
     renderIcons();
     mostrarToast("Falha ao salvar no Connect. Tente novamente.", "erro");
@@ -1895,7 +1948,11 @@ async function executarSalvamento(camposBase, novoStatus) {
 
   // Upload de fotos (pode ser vazio se não houver chave ou arquivos)
   let fotoExec = "";
-  if (IMGBB_API_KEY !== "SUA_CHAVE_IMGBB_AQUI" && _fotoArquivos.length && navigator.onLine) {
+  if (
+    IMGBB_API_KEY !== "SUA_CHAVE_IMGBB_AQUI" &&
+    _fotoArquivos.length &&
+    navigator.onLine
+  ) {
     try {
       mostrarStatusUpload("Enviando fotos...");
       fotoExec = await uploadTodasFotos(_fotoArquivos);
@@ -2086,8 +2143,10 @@ function configurarPreviewFotos() {
 
   const camera = document.getElementById("foto-camera");
   const galeria = document.getElementById("foto-galeria");
-  if (camera) camera.addEventListener("change", () => adicionarFotos(camera.files));
-  if (galeria) galeria.addEventListener("change", () => adicionarFotos(galeria.files));
+  if (camera)
+    camera.addEventListener("change", () => adicionarFotos(camera.files));
+  if (galeria)
+    galeria.addEventListener("change", () => adicionarFotos(galeria.files));
 }
 
 function renderizarPreviewFotos() {
@@ -2578,9 +2637,9 @@ function calcularICGPorCidade(lista) {
     if (!mapa[cidade]) {
       mapa[cidade] = {
         cidade,
-        mix:   { desc: 0, rec: 0 },
+        mix: { desc: 0, rec: 0 },
         opcao: { desc: 0, rec: 0 },
-        inad:  { desc: 0, rec: 0 },
+        inad: { desc: 0, rec: 0 },
       };
     }
     const r = mapa[cidade];
@@ -2588,8 +2647,13 @@ function calcularICGPorCidade(lista) {
     r.mix.desc++;
     if (recuperado) r.mix.rec++;
     const cat = categoriaTipo(c);
-    if (cat === "opcao") { r.opcao.desc++; if (recuperado) r.opcao.rec++; }
-    else if (cat === "inad") { r.inad.desc++;  if (recuperado) r.inad.rec++; }
+    if (cat === "opcao") {
+      r.opcao.desc++;
+      if (recuperado) r.opcao.rec++;
+    } else if (cat === "inad") {
+      r.inad.desc++;
+      if (recuperado) r.inad.rec++;
+    }
   });
   return Object.values(mapa).sort((a, b) => a.cidade.localeCompare(b.cidade));
 }
@@ -2597,37 +2661,52 @@ function calcularICGPorCidade(lista) {
 function icgCells(grp, meta) {
   if (!grp.desc) return `<td>—</td><td>—</td><td>—</td><td>—</td>`;
   const pend = grp.desc - grp.rec;
-  const icg  = grp.rec / grp.desc;
+  const icg = grp.rec / grp.desc;
   const icgPct = (icg * 100).toFixed(2).replace(".", ",") + "%";
-  const icgCls = icg >= meta ? "num-retirado" : icg >= meta * 0.8 ? "num-pendente" : "num-quebra";
+  const icgCls =
+    icg >= meta
+      ? "num-retirado"
+      : icg >= meta * 0.8
+        ? "num-pendente"
+        : "num-quebra";
   return `<td>${grp.rec}</td><td>${pend}</td><td class="${icgCls}">${icgPct}</td><td>—</td>`;
 }
 
 function icgCellsMix(grp, meta) {
   if (!grp.desc) return `<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>`;
   const pend = grp.desc - grp.rec;
-  const icg  = grp.rec / grp.desc;
+  const icg = grp.rec / grp.desc;
   const falta = Math.max(0, meta - icg);
-  const icgPct  = (icg  * 100).toFixed(2).replace(".", ",") + "%";
-  const faltaPct = falta > 0 ? (falta * 100).toFixed(1).replace(".", ",") + "%" : "✓";
-  const icgCls = icg >= meta ? "num-retirado" : icg >= meta * 0.8 ? "num-pendente" : "num-quebra";
+  const icgPct = (icg * 100).toFixed(2).replace(".", ",") + "%";
+  const faltaPct =
+    falta > 0 ? (falta * 100).toFixed(1).replace(".", ",") + "%" : "✓";
+  const icgCls =
+    icg >= meta
+      ? "num-retirado"
+      : icg >= meta * 0.8
+        ? "num-pendente"
+        : "num-quebra";
   return `<td>${grp.desc}</td><td>${grp.rec}</td><td>${pend}</td><td class="${icgCls}">${icgPct}</td><td class="${icgCls}">${faltaPct}</td>`;
 }
 
 function renderizarRelatorioHTML() {
-  const lista  = getContratosAdmin();
-  const dados  = calcularICGPorCidade(lista);
-  const META_MIX   = 0.78;
-  const META_OPCAO = 1.00;
-  const META_INAD  = 0.70;
+  const lista = getContratosAdmin();
+  const dados = calcularICGPorCidade(lista);
+  const META_MIX = 0.78;
+  const META_OPCAO = 1.0;
+  const META_INAD = 0.7;
 
-  const linhas = dados.map((r) => `
+  const linhas = dados
+    .map(
+      (r) => `
     <tr>
       <td class="icg-cidade">${r.cidade}</td>
-      ${icgCellsMix(r.mix,   META_MIX)}
+      ${icgCellsMix(r.mix, META_MIX)}
       ${icgCells(r.opcao, META_OPCAO)}
-      ${icgCells(r.inad,  META_INAD)}
-    </tr>`).join("");
+      ${icgCells(r.inad, META_INAD)}
+    </tr>`,
+    )
+    .join("");
 
   const tabelaHTML = `
     <div class="tabela-scroll">
@@ -2776,13 +2855,13 @@ function baixarCSV() {
 }
 
 function baixarCSVicg() {
-  const lista  = getContratosAdmin();
-  const dados  = calcularICGPorCidade(lista);
-  const META_MIX   = 0.78;
-  const META_OPCAO = 1.00;
-  const META_INAD  = 0.70;
+  const lista = getContratosAdmin();
+  const dados = calcularICGPorCidade(lista);
+  const META_MIX = 0.78;
+  const META_OPCAO = 1.0;
+  const META_INAD = 0.7;
 
-  const pct = (v, d) => d > 0 ? ((v / d) * 100).toFixed(1) + "%" : "—";
+  const pct = (v, d) => (d > 0 ? ((v / d) * 100).toFixed(1) + "%" : "—");
   const falta = (icg, meta, d) => {
     if (d === 0) return "—";
     const atual = icg / d;
@@ -2792,21 +2871,39 @@ function baixarCSVicg() {
 
   const cabecalho = [
     "Cidade",
-    "MIX Desconect.","MIX Recuper.","MIX Pendentes","MIX ICG%","MIX Falta p/Meta",
-    "OPÇ Recuper.","OPÇ Pendentes","OPÇ ICG%",
-    "INAD Recuper.","INAD Pendentes","INAD ICG%",
+    "MIX Desconect.",
+    "MIX Recuper.",
+    "MIX Pendentes",
+    "MIX ICG%",
+    "MIX Falta p/Meta",
+    "OPÇ Recuper.",
+    "OPÇ Pendentes",
+    "OPÇ ICG%",
+    "INAD Recuper.",
+    "INAD Pendentes",
+    "INAD ICG%",
   ].join(";");
 
   const linhas = dados.map((r) => {
     const mixPend = r.mix.desc - r.mix.rec;
-    const opPend  = r.opcao.desc - r.opcao.rec;
+    const opPend = r.opcao.desc - r.opcao.rec;
     const inadPend = r.inad.desc - r.inad.rec;
     return [
       r.cidade,
-      r.mix.desc, r.mix.rec, mixPend, pct(r.mix.rec, r.mix.desc), falta(r.mix.rec, META_MIX, r.mix.desc),
-      r.opcao.rec, opPend, pct(r.opcao.rec, r.opcao.desc),
-      r.inad.rec, inadPend, pct(r.inad.rec, r.inad.desc),
-    ].map((v) => `"${String(v || 0).replace(/"/g, '""')}"`).join(";");
+      r.mix.desc,
+      r.mix.rec,
+      mixPend,
+      pct(r.mix.rec, r.mix.desc),
+      falta(r.mix.rec, META_MIX, r.mix.desc),
+      r.opcao.rec,
+      opPend,
+      pct(r.opcao.rec, r.opcao.desc),
+      r.inad.rec,
+      inadPend,
+      pct(r.inad.rec, r.inad.desc),
+    ]
+      .map((v) => `"${String(v || 0).replace(/"/g, '""')}"`)
+      .join(";");
   });
 
   const csv = [cabecalho, ...linhas].join("\n");
