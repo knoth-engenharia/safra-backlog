@@ -907,6 +907,7 @@ let contratos = [];
 let contratoAtivo = null;
 let todosOsTecnicos = []; // populado no login
 let _connectCampos = []; // campos do último Connect aberto (para copiarTudoConnect)
+let _fotoArquivos = []; // fotos acumuladas de câmera + galeria
 let paginaAtual = 1;
 
 // Geolocalização
@@ -1873,15 +1874,10 @@ async function executarSalvamento(camposBase, novoStatus) {
 
   // Upload de fotos (pode ser vazio se não houver chave ou arquivos)
   let fotoExec = "";
-  const fotoInput = document.getElementById("foto-input");
-  if (
-    IMGBB_API_KEY !== "SUA_CHAVE_IMGBB_AQUI" &&
-    fotoInput?.files?.length &&
-    navigator.onLine
-  ) {
+  if (IMGBB_API_KEY !== "SUA_CHAVE_IMGBB_AQUI" && _fotoArquivos.length && navigator.onLine) {
     try {
       mostrarStatusUpload("Enviando fotos...");
-      fotoExec = await uploadTodasFotos(fotoInput);
+      fotoExec = await uploadTodasFotos(_fotoArquivos);
     } catch (e) {
       console.warn("Falha no upload de fotos:", e);
     }
@@ -2031,10 +2027,10 @@ async function uploadFoto(file) {
   return json.data.url;
 }
 
-async function uploadTodasFotos(input) {
-  if (!input?.files?.length) return "";
+async function uploadTodasFotos(arquivos) {
+  if (!arquivos?.length) return "";
   const urls = [];
-  for (const file of input.files) {
+  for (const file of arquivos) {
     const url = await uploadFoto(file);
     urls.push(url);
   }
@@ -2046,25 +2042,54 @@ function criarInputFoto() {
     <label class="detalhe-label" style="margin:10px 0 6px;display:block">
       Fotos de evidência
     </label>
-    <label class="btn-foto-label">
-      <i data-lucide="camera" class="icon icon-sm"></i> Selecionar fotos
-      <input type="file" id="foto-input" accept="image/*" multiple class="foto-input-hidden" />
-    </label>
+    <div class="foto-btns-row">
+      <label class="btn-foto-label btn-foto-camera">
+        <i data-lucide="camera" class="icon icon-sm"></i> Câmera
+        <input type="file" id="foto-camera" accept="image/*" capture="environment" class="foto-input-hidden" />
+      </label>
+      <label class="btn-foto-label btn-foto-galeria">
+        <i data-lucide="image" class="icon icon-sm"></i> Galeria
+        <input type="file" id="foto-galeria" accept="image/*" multiple class="foto-input-hidden" />
+      </label>
+    </div>
     <div id="foto-preview" class="foto-preview"></div>`;
 }
 
 function configurarPreviewFotos() {
-  const input = document.getElementById("foto-input");
-  if (!input) return;
-  input.addEventListener("change", () => {
-    const preview = document.getElementById("foto-preview");
-    preview.innerHTML = "";
-    Array.from(input.files).forEach((file) => {
-      const img = document.createElement("img");
-      img.src = URL.createObjectURL(file);
-      img.className = "foto-thumb-preview";
-      preview.appendChild(img);
+  _fotoArquivos = [];
+
+  function adicionarFotos(files) {
+    _fotoArquivos.push(...Array.from(files));
+    renderizarPreviewFotos();
+  }
+
+  const camera = document.getElementById("foto-camera");
+  const galeria = document.getElementById("foto-galeria");
+  if (camera) camera.addEventListener("change", () => adicionarFotos(camera.files));
+  if (galeria) galeria.addEventListener("change", () => adicionarFotos(galeria.files));
+}
+
+function renderizarPreviewFotos() {
+  const preview = document.getElementById("foto-preview");
+  if (!preview) return;
+  preview.innerHTML = "";
+  _fotoArquivos.forEach((file, idx) => {
+    const wrap = document.createElement("div");
+    wrap.className = "foto-thumb-wrap";
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(file);
+    img.className = "foto-thumb-preview";
+    const btn = document.createElement("button");
+    btn.className = "foto-thumb-remove";
+    btn.title = "Remover";
+    btn.textContent = "×";
+    btn.addEventListener("click", () => {
+      _fotoArquivos.splice(idx, 1);
+      renderizarPreviewFotos();
     });
+    wrap.appendChild(img);
+    wrap.appendChild(btn);
+    preview.appendChild(wrap);
   });
 }
 
@@ -2087,9 +2112,8 @@ function criarFotosModal(fotoExec) {
 // VALIDAÇÃO DE FOTOS + SELEÇÃO DE SERIAIS
 // =========================================
 function validarFotos() {
-  const fotoInput = document.getElementById("foto-input");
-  if (!fotoInput?.files?.length) {
-    if (!navigator.onLine) return true; // offline: bypass, foto será registrada depois
+  if (!_fotoArquivos.length) {
+    if (!navigator.onLine) return true; // offline: bypass
     mostrarToast("Anexe ao menos uma foto de evidência.", "aviso");
     return false;
   }
