@@ -18,6 +18,7 @@ const COL_FOTO = "FOTO_EXEC";
 const COL_BAIXA_SITE = "BAIXA_SITE";
 const COL_SERIAIS_RET = "SERIAIS_RETIRADOS";
 const COL_VISITAS = "VISITAS";
+const COL_NO_CONNECT = "NO_CONNECT";
 
 const POR_PAGINA = 30;
 
@@ -44,6 +45,17 @@ function toTitleCase(str) {
     .replace(/\s+/g, " ")
     .toLowerCase()
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function nomeTecnico(usuario) {
+  if (!usuario?.trim()) return "";
+  const match = todosOsTecnicos.find(
+    (t) =>
+      (t["USUARIO"] || "").trim().toLowerCase() ===
+      usuario.trim().toLowerCase(),
+  );
+  if (match?.["NOME"]) return toTitleCase(match["NOME"]);
+  return toTitleCase(usuario.replace(/[._]/g, " "));
 }
 
 function parseDateBR(str) {
@@ -176,7 +188,7 @@ function criarAlertaDuplicatasHTML(dups) {
   const items = dups
     .map((d) => {
       const cls = statusParaClasse(d.status);
-      return `<li><span class="badge-status badge-${cls} badge-sm">${d.status}</span> <strong>${d.contrato}</strong> — ${d.bairro}</li>`;
+      return `<li><span class="badge-status badge-${cls} badge-sm">${d.status}</span> <strong>${d.contrato}</strong></li>`;
     })
     .join("");
   return `<div class="alerta-duplicata"><i data-lucide="alert-triangle" class="icon icon-sm"></i> <strong>Atenção:</strong> Mesmo cliente/endereço em outros contratos:<ul class="duplicata-lista">${items}</ul></div>`;
@@ -329,7 +341,9 @@ function ativarLocalizacao() {
   }
 
   // Limpa cache de geocoding para reprocessar com o novo formato de query
-  try { sessionStorage.removeItem(GEOCODE_CACHE_KEY); } catch {}
+  try {
+    sessionStorage.removeItem(GEOCODE_CACHE_KEY);
+  } catch {}
   contratoDistancias.clear();
 
   navigator.geolocation.getCurrentPosition(
@@ -638,6 +652,7 @@ async function tentarLogin() {
     const respJson = await resp.json();
     const lista = respJson.data ?? [];
 
+    todosOsTecnicos = lista; // armazena para lookup de nomes
     const match = lista.find(
       (u) =>
         u["USUARIO"]?.trim().toLowerCase() === usuario &&
@@ -714,6 +729,7 @@ function mapearContrato(linha, indice) {
     horario: linha["HORARIO"] || "",
     tecnicoDesig: linha["TECNICO_DESIG"] || "",
     status: linha["STATUS"] || "Pendente",
+    noConnect: linha[COL_NO_CONNECT] || "",
     _raw: linha,
   };
 }
@@ -889,6 +905,8 @@ async function atualizarIndicadorOffline() {
 // =========================================
 let contratos = [];
 let contratoAtivo = null;
+let todosOsTecnicos = []; // populado no login
+let _connectCampos = []; // campos do último Connect aberto (para copiarTudoConnect)
 let paginaAtual = 1;
 
 // Geolocalização
@@ -1188,8 +1206,15 @@ function toggleFiltros() {
 function atualizarBadgeFiltros() {
   const badge = document.getElementById("badge-filtros-ativos");
   if (!badge) return;
-  const ids = ["filter-cidade", "filter-bairro", "filter-status", "filter-tipo",
-               "filter-tecnico", "filter-periodo", "filter-distancia"];
+  const ids = [
+    "filter-cidade",
+    "filter-bairro",
+    "filter-status",
+    "filter-tipo",
+    "filter-tecnico",
+    "filter-periodo",
+    "filter-distancia",
+  ];
   let count = ids.filter((id) => document.getElementById(id)?.value).length;
   if (userLocation) count++;
   if (modoAgrupamento) count++;
@@ -1305,7 +1330,13 @@ function renderizarLista(lista) {
     });
   } else {
     // Ordem padrão: agendados hoje → outros agendados → Pendente → Parcial → Quebra → Retirado
-    const STATUS_ORDEM = { Pendente: 0, Parcial: 1, Quebra: 2, Ausente: 2, Retirado: 3 };
+    const STATUS_ORDEM = {
+      Pendente: 0,
+      Parcial: 1,
+      Quebra: 2,
+      Ausente: 2,
+      Retirado: 3,
+    };
     const usuario = tecnicoLogado()?.usuario?.toLowerCase() || "";
     const hojeStr = new Date().toLocaleDateString("pt-BR");
     const ehAgendado = (c) =>
@@ -1316,7 +1347,9 @@ function renderizarLista(lista) {
     const outrosAgendados = lista.filter((c) => ehAgendado(c) && !ehHoje(c));
     const outros = lista
       .filter((c) => !ehAgendado(c))
-      .sort((a, b) => (STATUS_ORDEM[a.status] ?? 2) - (STATUS_ORDEM[b.status] ?? 2));
+      .sort(
+        (a, b) => (STATUS_ORDEM[a.status] ?? 2) - (STATUS_ORDEM[b.status] ?? 2),
+      );
     ordenada = [...agendadosHoje, ...outrosAgendados, ...outros];
   }
 
@@ -1550,51 +1583,198 @@ function abrirModal(contrato) {
   contratoAtivo = contrato;
   const body = document.getElementById("modal-body");
   const novoEnd = extrairNovoEndereco(contrato.obs2);
-
-  const campo = (label, valor) =>
-    valor
-      ? `<div class="detalhe-campo"><span class="detalhe-label">${label}</span><span class="detalhe-valor">${valor}</span></div>`
-      : "";
-
   const endParaMaps = novoEnd || contrato.endereco;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${endParaMaps}, ${contrato.cidade}`)}`;
-  const btnMaps = `<a href="${mapsUrl}" class="btn-mapa-modal" target="_blank"><i data-lucide="map-pin" class="icon icon-sm"></i> Ver no Google Maps</a>`;
-
   const duplicatas = detectarDuplicatas(contrato);
+  const cls = statusParaClasse(contrato.status);
+  const nomeDesig = nomeTecnico(contrato.tecnicoDesig);
+
+  const f = (label, valor, destaque = false) =>
+    valor
+      ? `<div class="detalhe-campo"><span class="detalhe-label">${label}</span><span class="detalhe-valor${destaque ? " detalhe-destaque" : ""}">${valor}</span></div>`
+      : "";
+
+  const g2 = (a, b) =>
+    a || b ? `<div class="modal-grid-2">${a || ""}${b || ""}</div>` : "";
+
+  const secao = (titulo, html) =>
+    html?.trim()
+      ? `<div class="modal-secao"><div class="modal-secao-titulo">${titulo}</div><div class="modal-secao-corpo">${html}</div></div>`
+      : "";
+
+  const temExec =
+    contrato.codigoOS ||
+    contrato.dataExec ||
+    contrato.tecnicoExec ||
+    contrato.obsExec;
+  const agendStr = [
+    contrato.dataAgend,
+    contrato.horario ? `às ${contrato.horario}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   body.innerHTML = `
     ${criarAlertaDuplicatasHTML(duplicatas)}
-    <div class="detalhe-titulo">${contrato.nome}</div>
-    ${campo("Contrato", contrato.contrato)}
-    ${campo("Cidade", contrato.cidade)}
-    ${campo("Bairro", contrato.bairro)}
+    <div class="modal-nome">${contrato.nome}</div>
+    <div class="modal-status-row">
+      <span class="badge-status badge-${cls}">${contrato.status}</span>
+      ${criarBadgeSLA(contrato)}
+      ${criarBadgeDistancia(contrato)}
+    </div>
+
+    ${secao(
+      "Identificação",
+      g2(
+        f("Contrato", contrato.contrato),
+        f("Data Pendente", contrato.dataPend),
+      ),
+    )}
+
+    ${secao(
+      "Localização",
+      `
+      ${novoEnd ? f("Endereço Original", contrato.endereco) : ""}
+      ${f(novoEnd ? "Novo Endereço" : "Endereço", endParaMaps, !!novoEnd)}
+      ${g2(f("Bairro", contrato.bairro), f("Cidade", contrato.cidade))}
+      <a href="${mapsUrl}" class="btn-mapa-modal" target="_blank">
+        <i data-lucide="map-pin" class="icon icon-sm"></i> Ver no Google Maps
+      </a>
+    `,
+    )}
+
+    ${secao(
+      "Serviço",
+      `
+      ${f("Tipo Desconexão", contrato.tipoDesconexao)}
+      ${criarSeriaisHTML(contrato.terminais)}
+      ${f("OBS 1", contrato.obs1)}
+      ${f("OBS 2", contrato.obs2)}
+    `,
+    )}
+
     ${
-      novoEnd
-        ? `${campo("Endereço original", contrato.endereco)}<div class="detalhe-campo"><span class="detalhe-label">Novo Endereço</span><span class="detalhe-valor detalhe-destaque">${novoEnd}</span>${btnMaps}</div>`
-        : `<div class="detalhe-campo"><span class="detalhe-label">Endereço</span><span class="detalhe-valor">${contrato.endereco}</span>${btnMaps}</div>`
+      agendStr || nomeDesig
+        ? secao(
+            "Agendamento",
+            g2(
+              agendStr ? f("Data", agendStr) : "",
+              nomeDesig ? f("Técnico Designado", nomeDesig) : "",
+            ),
+          )
+        : ""
     }
-    ${campo("Data Pendente", contrato.dataPend)}
-    ${campo("OBS 1", contrato.obs1)}
-    ${campo("OBS 2", contrato.obs2)}
-    ${contrato.dataAgend || contrato.horario ? campo("Agendamento", `${contrato.dataAgend || ""}${contrato.horario ? ` às ${contrato.horario}` : ""}`) : ""}
-    ${campo("Técnico Designado", contrato.tecnicoDesig)}
-    ${campo("Cluster", contrato.cluster)}
-    ${campo("Qtd. Equipamentos", contrato.quantidade)}
-    ${criarSeriaisHTML(contrato.terminais)}
-    ${campo("Tipo Desconexão", contrato.tipoDesconexao)}
-    ${campo("Código OS", contrato.codigoOS)}
-    ${campo("Obs. Execução", contrato.obsExec)}
-    ${campo("Técnico", contrato.tecnicoExec)}
-    ${campo("Data de Execução", contrato.dataExec)}
-    ${campo("Status atual", contrato.status)}
-    ${criarFotosModal(contrato.fotoExec)}
-    ${criarVisitasHTML(contrato.visitas)}
+
+    ${
+      temExec
+        ? secao(
+            "Execução",
+            `
+      ${g2(f("Técnico", contrato.tecnicoExec), f("Data", contrato.dataExec))}
+      ${f("Código OS", contrato.codigoOS)}
+      ${f("Obs. Execução", contrato.obsExec)}
+      ${criarFotosModal(contrato.fotoExec)}
+      ${criarVisitasHTML(contrato.visitas)}
+    `,
+          )
+        : ""
+    }
 
     <div class="secao-telefones">${criarBotoesPhone(contrato)}</div>
-    <div class="acoes" id="acoes-modal">${criarAcoesHTML()}</div>`;
+    <div class="acoes" id="acoes-modal">${criarAcoesHTML()}</div>
+    ${tecnicoLogado()?.adm ? `<button class="btn-connect" onclick="abrirModalConnect(contratoAtivo)"><i data-lucide="clipboard-list" class="icon icon-sm"></i> Dados para Connect</button>` : ""}`;
 
   document.getElementById("modal").classList.remove("hidden");
   renderIcons();
+}
+
+// =========================================
+// MODAL CONNECT (admin)
+// =========================================
+function abrirModalConnect(c) {
+  const novoEnd = extrairNovoEndereco(c.obs2);
+  const endereco = novoEnd || c.endereco;
+
+  const campos = [
+    {
+      label: "Data de Execução",
+      valor: c.dataExec ? c.dataExec.split(" ")[0] : "—",
+    },
+    { label: "Nome do Cliente", valor: c.nome },
+    { label: "Endereço", valor: endereco },
+    { label: "Bairro", valor: c.bairro },
+    { label: "Cidade", valor: c.cidade },
+    { label: "Contrato", valor: c.contrato },
+    {
+      label: "Técnico",
+      valor: c.tecnicoExec || nomeTecnico(c.tecnicoDesig) || "—",
+    },
+  ];
+
+  _connectCampos = campos;
+  const linhas = campos
+    .map(
+      (f, i) => `
+    <div class="connect-row">
+      <span class="connect-label">${f.label}</span>
+      <span class="connect-valor">${f.valor}</span>
+      <button class="btn-copiar-campo" onclick="copiarCampoConnect(${i})" title="Copiar">
+        <i data-lucide="copy" class="icon icon-sm"></i>
+      </button>
+    </div>`,
+    )
+    .join("");
+
+  const jaLancado = !!c.noConnect;
+  const btnConnect = jaLancado
+    ? `<div class="connect-lancado"><i data-lucide="check-circle" class="icon icon-sm"></i> Lançado no Connect</div>`
+    : `<button class="btn-marcar-connect" onclick="marcarNoConnect()"><i data-lucide="check" class="icon icon-sm"></i> Marcar como lançado no Connect</button>`;
+
+  document.getElementById("connect-body").innerHTML = linhas;
+  document.getElementById("connect-footer").innerHTML = btnConnect;
+  document.getElementById("modal-connect").classList.remove("hidden");
+  renderIcons();
+}
+
+async function marcarNoConnect() {
+  if (!contratoAtivo) return;
+  const btn = document.querySelector(".btn-marcar-connect");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Salvando...";
+  }
+  try {
+    await salvarNaPlanilha(contratoAtivo, { [COL_NO_CONNECT]: "SIM" });
+    contratoAtivo.noConnect = "SIM"; // mesma referência que contratos[], atualiza ambos
+    document.getElementById("connect-footer").innerHTML =
+      `<div class="connect-lancado"><i data-lucide="check-circle" class="icon icon-sm"></i> Lançado no Connect</div>`;
+    renderIcons();
+    mostrarToast("Marcado como lançado no Connect!", "sucesso");
+  } catch {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Marcar como lançado no Connect";
+    }
+    mostrarToast("Erro ao salvar. Tente novamente.", "erro");
+  }
+}
+
+function fecharModalConnect() {
+  document.getElementById("modal-connect").classList.add("hidden");
+}
+
+function copiarCampoConnect(idx) {
+  const val = _connectCampos[idx]?.valor || "";
+  navigator.clipboard
+    .writeText(val)
+    .then(() => mostrarToast("Copiado!", "sucesso"));
+}
+
+function copiarTudoConnect() {
+  const texto = _connectCampos.map((f) => `${f.label}: ${f.valor}`).join("\n");
+  navigator.clipboard
+    .writeText(texto)
+    .then(() => mostrarToast("Todos os campos copiados!", "sucesso"));
 }
 
 function criarAcoesHTML() {
@@ -2200,9 +2380,9 @@ function renderizarAdmin() {
   const conteudo = document.getElementById("admin-conteudo");
   if (adminTabAtiva === "metricas")
     conteudo.innerHTML = renderizarMetricasHTML(lista);
-  else if (adminTabAtiva === "historico")
+  else if (adminTabAtiva === "historico") {
     conteudo.innerHTML = renderizarHistoricoHTML(lista);
-  else if (adminTabAtiva === "relatorio")
+  } else if (adminTabAtiva === "relatorio")
     conteudo.innerHTML = renderizarRelatorioHTML();
   renderIcons();
 }
@@ -2273,38 +2453,69 @@ function renderizarMetricasHTML(lista) {
 }
 
 function renderizarHistoricoHTML(lista) {
+  const filtroStatus =
+    document.getElementById("adm-filter-hist-status")?.value || "Retirado";
+
   const baixas = lista
-    .filter((c) => c.status === "Retirado" || c.status === "Quebra")
+    .filter((c) => {
+      if (filtroStatus === "Todos")
+        return c.status === "Retirado" || c.status === "Quebra";
+      return c.status === filtroStatus;
+    })
     .sort((a, b) => parseDateBR(b.dataExec) - parseDateBR(a.dataExec));
 
   if (!baixas.length) {
-    return `<div class="estado-vazio"><div class="icone">📋</div><p>Nenhuma baixa encontrada com os filtros selecionados.</p></div>`;
+    return `<div class="admin-secao">
+      ${criarFiltroHistStatus(filtroStatus)}
+      <div class="estado-vazio"><p>Nenhuma baixa encontrada.</p></div>
+    </div>`;
   }
 
   const linhas = baixas
     .map((c) => {
       const cls = statusParaClasse(c.status);
-      return `<tr>
+      const connectBadge = c.noConnect
+        ? `<span class="badge-connect-ok" title="Lançado no Connect">✓</span>`
+        : `<span class="badge-connect-pendente" title="Pendente no Connect">—</span>`;
+      return `<tr class="hist-linha" data-id="${c.id}">
         <td>${c.contrato}</td>
         <td>${c.nome}</td>
         <td>${c.cidade}</td>
         <td><span class="badge-status badge-${cls} badge-sm">${c.status}</span></td>
         <td>${c.tecnicoExec || "—"}</td>
-        <td class="col-data">${c.dataExec || "—"}</td>
+        <td class="col-data">${c.dataExec ? c.dataExec.split(" ")[0] : "—"}</td>
+        <td class="col-connect">${connectBadge}</td>
       </tr>`;
     })
     .join("");
 
   return `
     <div class="admin-secao">
-      <p class="historico-count">${baixas.length} baixa(s) encontrada(s)</p>
+      ${criarFiltroHistStatus(filtroStatus)}
+      <p class="historico-count">${baixas.length} registro(s)</p>
       <div class="tabela-scroll">
         <table class="admin-table">
-          <thead><tr><th>Contrato</th><th>Nome</th><th>Cidade</th><th>Status</th><th>Técnico</th><th>Data Exec.</th></tr></thead>
+          <thead><tr><th>Contrato</th><th>Nome</th><th>Cidade</th><th>Status</th><th>Técnico</th><th>Data</th><th>Connect</th></tr></thead>
           <tbody>${linhas}</tbody>
         </table>
       </div>
     </div>`;
+}
+
+function criarFiltroHistStatus(valorAtual) {
+  return `<div class="hist-filtro-status">
+    <label class="hist-filtro-label">Mostrar:</label>
+    <select id="adm-filter-hist-status" class="input-select-sm" onchange="renderizarAdmin()">
+      <option value="Retirado" ${valorAtual === "Retirado" ? "selected" : ""}>Somente Retirados</option>
+      <option value="Quebra" ${valorAtual === "Quebra" ? "selected" : ""}>Somente Quebras</option>
+      <option value="Todos" ${valorAtual === "Todos" ? "selected" : ""}>Todos (Ret. + Quebra)</option>
+    </select>
+  </div>`;
+}
+
+function abrirModalPorId(id) {
+  const c = contratos.find((x) => x.id === id);
+  if (c) abrirModal(c);
 }
 
 function renderizarRelatorioHTML() {
@@ -2503,8 +2714,15 @@ function configurarEventos() {
   document.getElementById("modal").addEventListener("click", (e) => {
     if (e.target.id === "modal") fecharModal();
   });
+  document.getElementById("modal-connect").addEventListener("click", (e) => {
+    if (e.target.id === "modal-connect") fecharModalConnect();
+  });
 
-  // Admin
+  // Admin — delegação para linhas clicáveis do histórico (evita re-adicionar listeners)
+  document.getElementById("admin-conteudo").addEventListener("click", (e) => {
+    const tr = e.target.closest(".hist-linha");
+    if (tr) abrirModalPorId(tr.dataset.id);
+  });
   document.getElementById("btn-admin").addEventListener("click", abrirAdmin);
   document
     .getElementById("btn-voltar-lista")

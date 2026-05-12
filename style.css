@@ -550,7 +550,119 @@ body {
   background: #e5e7eb;
 }
 
-/* Detalhes dentro do modal */
+/* ---- Cabeçalho do modal redesenhado ---- */
+.modal-nome {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0056b3;
+  margin-bottom: 6px;
+}
+.modal-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+/* ---- Seções categorized ---- */
+.modal-secao {
+  border: 1.5px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.modal-secao-titulo {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #6b7280;
+  background: #f9fafb;
+  padding: 5px 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.modal-secao-corpo {
+  padding: 10px 12px;
+}
+.modal-secao-corpo .detalhe-campo {
+  margin-bottom: 8px;
+}
+.modal-secao-corpo .detalhe-campo:last-child {
+  margin-bottom: 0;
+}
+.modal-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+}
+
+/* ---- Filtro de status no histórico ---- */
+.hist-filtro-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.hist-filtro-label {
+  font-size: 0.82rem;
+  color: #6b7280;
+  font-weight: 600;
+}
+.col-connect {
+  text-align: center;
+}
+.hist-linha {
+  cursor: pointer;
+}
+.hist-linha:hover {
+  background: #f9fafb;
+}
+.badge-connect-ok {
+  color: #059669;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.badge-connect-pendente {
+  color: #9ca3af;
+  font-size: 0.9rem;
+}
+
+/* ---- Botão e badge no modal Connect ---- */
+.btn-marcar-connect {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 11px;
+  background: #ecfdf5;
+  border: 1.5px solid #6ee7b7;
+  border-radius: 10px;
+  color: #065f46;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-marcar-connect:active {
+  background: #d1fae5;
+}
+.connect-lancado {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 11px;
+  background: #ecfdf5;
+  border-radius: 10px;
+  color: #059669;
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+/* Detalhes dentro do modal (compat.) */
 .detalhe-titulo {
   font-size: 1.2rem;
   font-weight: 700;
@@ -693,6 +805,104 @@ body {
 }
 
 /* =========================================
+   BOTÃO CONNECT (admin) — dentro do modal
+   ========================================= */
+.btn-connect {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 14px;
+  padding: 12px;
+  background: #eff6ff;
+  border: 1.5px solid #bfdbfe;
+  border-radius: 10px;
+  color: #1d4ed8;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-connect:active {
+  background: #dbeafe;
+}
+
+/* Modal Connect — layout */
+.connect-content {
+  max-height: 80vh;
+}
+.connect-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 8px;
+}
+.connect-header .modal-fechar {
+  width: auto;
+  margin-bottom: 0;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+}
+.connect-titulo {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+.connect-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+.connect-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  width: 120px;
+  flex-shrink: 0;
+}
+.connect-valor {
+  flex: 1;
+  font-size: 0.92rem;
+  color: #111827;
+  font-weight: 500;
+  word-break: break-word;
+}
+.btn-copiar-campo {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  background: #f3f4f6;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #374151;
+}
+.btn-copiar-campo:active {
+  background: #e5e7eb;
+}
+.btn-copiar-tudo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 16px;
+  padding: 13px;
+  background: #1d4ed8;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-copiar-tudo:active {
+  background: #1e40af;
+}
+
+/* =========================================
    PAGINAÇÃO
    ========================================= */
 .paginacao {
@@ -739,6 +949,7 @@ body {
   border-radius: 8px;
   outline: none;
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 .pag-input::-webkit-outer-spin-button,
 .pag-input::-webkit-inner-spin-button {
