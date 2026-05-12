@@ -47,6 +47,16 @@ function toTitleCase(str) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function escHtml(s) {
+  if (!s) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function nomeTecnico(usuario) {
   if (!usuario?.trim()) return "";
   const match = todosOsTecnicos.find(
@@ -188,7 +198,7 @@ function criarAlertaDuplicatasHTML(dups) {
   const items = dups
     .map((d) => {
       const cls = statusParaClasse(d.status);
-      return `<li><span class="badge-status badge-${cls} badge-sm">${d.status}</span> <strong>${d.contrato}</strong></li>`;
+      return `<li><span class="badge-status badge-${cls} badge-sm">${escHtml(d.status)}</span> <strong>${escHtml(d.contrato)}</strong></li>`;
     })
     .join("");
   return `<div class="alerta-duplicata"><i data-lucide="alert-triangle" class="icon icon-sm"></i> <strong>Atenção:</strong> Mesmo cliente/endereço em outros contratos:<ul class="duplicata-lista">${items}</ul></div>`;
@@ -205,7 +215,7 @@ function criarVisitasHTML(visitas) {
   const itens = lista
     .map(
       (v) =>
-        `<li class="visita-item"><i data-lucide="clock" class="icon icon-sm"></i> ${v}</li>`,
+        `<li class="visita-item"><i data-lucide="clock" class="icon icon-sm"></i> ${escHtml(v)}</li>`,
     )
     .join("");
   return `<div class="detalhe-campo">
@@ -1288,7 +1298,7 @@ function criarSeriaisHTML(terminais) {
   const lista = parsearSeriais(terminais);
   if (!lista.length) return "";
   const chips = lista
-    .map((s) => `<span class="serial-chip">${s}</span>`)
+    .map((s) => `<span class="serial-chip">${escHtml(s)}</span>`)
     .join("");
   return `<div class="detalhe-campo">
     <span class="detalhe-label">Equipamentos a retirar (${lista.length})</span>
@@ -1524,15 +1534,15 @@ function criarCartaoHTML(c) {
   const agendadoHoje = agendado && c.dataAgend?.trim() === hojeStr;
 
   const agendadoHeader = agendado
-    ? `<div class="cartao-agendado-header${agendadoHoje ? " cartao-agendado-hoje-header" : ""}"><i data-lucide="calendar" class="icon icon-sm"></i> ${agendadoHoje ? "HOJE" : "AGENDADO"} — ${c.dataAgend || ""}${c.horario ? ` às ${c.horario}` : ""}</div>`
+    ? `<div class="cartao-agendado-header${agendadoHoje ? " cartao-agendado-hoje-header" : ""}"><i data-lucide="calendar" class="icon icon-sm"></i> ${agendadoHoje ? "HOJE" : "AGENDADO"} — ${escHtml(c.dataAgend || "")}${c.horario ? ` às ${escHtml(c.horario)}` : ""}</div>`
     : "";
 
   const dataExecHTML = c.dataExec
-    ? `<div class="cartao-data-exec">Exec: ${c.dataExec}${c.tecnicoExec ? ` · ${c.tecnicoExec}` : ""}</div>`
+    ? `<div class="cartao-data-exec">Exec: ${escHtml(c.dataExec)}${c.tecnicoExec ? ` · ${escHtml(c.tecnicoExec)}` : ""}</div>`
     : "";
 
   const tipoBadge = c.tipoDesconexao
-    ? `<span class="badge-tipo badge-tipo-${c.tipoDesconexao.toLowerCase()}">${c.tipoDesconexao}</span>`
+    ? `<span class="badge-tipo badge-tipo-${escHtml(c.tipoDesconexao.toLowerCase())}">${escHtml(c.tipoDesconexao)}</span>`
     : "";
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${endExib}, ${c.cidade}`)}`;
@@ -1545,20 +1555,20 @@ function criarCartaoHTML(c) {
     <div class="cartao status-${cls}${agendado ? " cartao-agendado" : ""}${modoRota ? " cartao-modo-rota" : ""}" id="cartao-${c.id}">
       ${rotaIndicador}
       ${agendadoHeader}
-      <div class="cartao-nome">${c.nome}</div>
+      <div class="cartao-nome">${escHtml(c.nome)}</div>
       <div class="cartao-info">
-        ${c.cidade} — ${c.bairro}<br/>
+        ${escHtml(c.cidade)} — ${escHtml(c.bairro)}<br/>
         <div class="end-row">
-          <span>${novoEnd ? `<span class="tag-novo-end">Novo end.</span> ` : ""}${endExib}</span>
+          <span>${novoEnd ? `<span class="tag-novo-end">Novo end.</span> ` : ""}${escHtml(endExib)}</span>
           <a href="${mapsUrl}" class="btn-mapa-card" target="_blank" onclick="event.stopPropagation()" title="Ver no mapa"><i data-lucide="map-pin" class="icon icon-sm"></i></a>
         </div>
-        ${telExib ? `<br/>${telExib}` : ""}
+        ${telExib ? `<br/>${escHtml(telExib)}` : ""}
       </div>
       <div class="cartao-footer">
-        <span class="badge-status badge-${cls}">${c.status}</span>
+        <span class="badge-status badge-${cls}">${escHtml(c.status)}</span>
         ${criarBadgeSLA(c)}
         ${criarBadgeDistancia(c)}
-        <span class="cartao-detalhe">${c.contrato}</span>
+        <span class="cartao-detalhe">${escHtml(c.contrato)}</span>
         ${tipoBadge}
       </div>
       ${dataExecHTML}
@@ -1592,7 +1602,7 @@ function abrirModal(contrato) {
 
   const f = (label, valor, destaque = false) =>
     valor
-      ? `<div class="detalhe-campo"><span class="detalhe-label">${label}</span><span class="detalhe-valor${destaque ? " detalhe-destaque" : ""}">${valor}</span></div>`
+      ? `<div class="detalhe-campo"><span class="detalhe-label">${label}</span><span class="detalhe-valor${destaque ? " detalhe-destaque" : ""}">${escHtml(valor)}</span></div>`
       : "";
 
   const g2 = (a, b) =>
@@ -1617,9 +1627,9 @@ function abrirModal(contrato) {
 
   body.innerHTML = `
     ${criarAlertaDuplicatasHTML(duplicatas)}
-    <div class="modal-nome">${contrato.nome}</div>
+    <div class="modal-nome">${escHtml(contrato.nome)}</div>
     <div class="modal-status-row">
-      <span class="badge-status badge-${cls}">${contrato.status}</span>
+      <span class="badge-status badge-${cls}">${escHtml(contrato.status)}</span>
       ${criarBadgeSLA(contrato)}
       ${criarBadgeDistancia(contrato)}
     </div>
@@ -2008,7 +2018,7 @@ function criarBotoesPhone(c) {
       const intl = digits.startsWith("55") ? digits : `55${digits}`;
       return `
       <div class="phone-item">
-        <span class="phone-label">${label}: <strong>${valor}</strong></span>
+        <span class="phone-label">${label}: <strong>${escHtml(valor)}</strong></span>
         <div class="phone-btns">
           <a href="tel:+${digits}" class="btn-phone btn-ligar"><i data-lucide="phone" class="icon icon-sm"></i> Ligar</a>
           <a href="https://wa.me/${intl}?text=${msg}" class="btn-phone btn-whats" target="_blank"><i data-lucide="message-circle" class="icon icon-sm"></i> WhatsApp</a>
@@ -2436,7 +2446,7 @@ function renderizarMetricasHTML(lista) {
       const r = cx.filter((c) => c.status === "Retirado").length;
       const q = cx.filter((c) => c.status === "Quebra").length;
       const p = cx.filter((c) => c.status === "Pendente").length;
-      return `<tr><td>${cidade}</td><td class="num-pendente">${p}</td><td class="num-retirado">${r}</td><td class="num-quebra">${q}</td><td>${cx.length}</td></tr>`;
+      return `<tr><td>${escHtml(cidade)}</td><td class="num-pendente">${p}</td><td class="num-retirado">${r}</td><td class="num-quebra">${q}</td><td>${cx.length}</td></tr>`;
     })
     .join("");
 
@@ -2448,7 +2458,7 @@ function renderizarMetricasHTML(lista) {
       const tx = lista.filter((c) => c.tecnicoExec === tec);
       const r = tx.filter((c) => c.status === "Retirado").length;
       const q = tx.filter((c) => c.status === "Quebra").length;
-      return `<tr><td>${tec}</td><td class="num-retirado">${r}</td><td class="num-quebra">${q}</td><td>${tx.length}</td></tr>`;
+      return `<tr><td>${escHtml(tec)}</td><td class="num-retirado">${r}</td><td class="num-quebra">${q}</td><td>${tx.length}</td></tr>`;
     })
     .join("");
 
@@ -2512,13 +2522,13 @@ function renderizarHistoricoHTML(lista) {
       const connectBadge = c.noConnect
         ? `<span class="badge-connect-ok" title="Lançado no Connect">✓</span>`
         : `<span class="badge-connect-pendente" title="Pendente no Connect">—</span>`;
-      return `<tr class="hist-linha" data-id="${c.id}">
-        <td>${c.contrato}</td>
-        <td>${c.nome}</td>
-        <td>${c.cidade}</td>
-        <td><span class="badge-status badge-${cls} badge-sm">${c.status}</span></td>
-        <td>${c.tecnicoExec || "—"}</td>
-        <td class="col-data">${c.dataExec ? c.dataExec.split(" ")[0] : "—"}</td>
+      return `<tr class="hist-linha" data-id="${escHtml(c.id)}">
+        <td>${escHtml(c.contrato)}</td>
+        <td>${escHtml(c.nome)}</td>
+        <td>${escHtml(c.cidade)}</td>
+        <td><span class="badge-status badge-${cls} badge-sm">${escHtml(c.status)}</span></td>
+        <td>${c.tecnicoExec ? escHtml(c.tecnicoExec) : "—"}</td>
+        <td class="col-data">${c.dataExec ? escHtml(c.dataExec.split(" ")[0]) : "—"}</td>
         <td class="col-connect">${connectBadge}</td>
       </tr>`;
     })
