@@ -2119,3 +2119,67 @@ body {
   font-weight: 400;
   opacity: 0.9;
 }
+
+/* ===== ICG TABLE ===== */
+.icg-table th, .icg-table td {
+  font-size: 0.78rem;
+  padding: 6px 8px;
+  white-space: nowrap;
+  text-align: center;
+}
+.icg-table td.icg-cidade {
+  text-align: left;
+  font-weight: 600;
+  white-space: normal;
+  min-width: 100px;
+}
+.icg-head-grupo th {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #fff;
+}
+.icg-head-mix {
+  background: #1e40af;
+}
+.icg-head-opcao {
+  background: #0e7490;
+}
+.icg-head-inad {
+  background: #b91c1c;
+}
+.icg-th-cidade {
+  background: #374151;
+  color: #fff;
+}
+.icg-head-sub th {
+  background: #f1f5f9;
+  color: #374151;
+  font-weight: 600;
+  font-size: 0.72rem;
+  border-bottom: 2px solid #e2e8f0;
+}
+.icg-table .icg-meta-ok {
+  color: #16a34a;
+  font-weight: 700;
+}
+.icg-table .icg-meta-warn {
+  color: #d97706;
+  font-weight: 700;
+}
+.icg-table .icg-meta-bad {
+  color: #dc2626;
+  font-weight: 700;
+}
+.relatorio-btns {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.btn-relatorio-sec {
+  background: #6b7280 !important;
+}
+.btn-relatorio-sec:hover {
+  background: #4b5563 !important;
+}

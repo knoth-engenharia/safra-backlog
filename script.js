@@ -1737,27 +1737,38 @@ function abrirModalConnect(c) {
   renderIcons();
 }
 
-async function marcarNoConnect() {
+function marcarNoConnect() {
   if (!contratoAtivo) return;
-  const btn = document.querySelector(".btn-marcar-connect");
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Salvando...";
+  const id = contratoAtivo.id;
+
+  // Atualização otimista — UI responde imediatamente
+  contratoAtivo.noConnect = "SIM";
+  document.getElementById("connect-footer").innerHTML =
+    `<div class="connect-lancado"><i data-lucide="check-circle" class="icon icon-sm"></i> Lançado no Connect</div>`;
+  renderIcons();
+
+  // Atualiza badge na linha do histórico admin (se visível), sem re-render
+  const tr = document.querySelector(`.hist-linha[data-id="${id}"]`);
+  if (tr) {
+    const cell = tr.querySelector(".col-connect");
+    if (cell) cell.innerHTML = `<span class="badge-connect-ok" title="Lançado no Connect">✓</span>`;
   }
-  try {
-    await salvarNaPlanilha(contratoAtivo, { [COL_NO_CONNECT]: "SIM" });
-    contratoAtivo.noConnect = "SIM"; // mesma referência que contratos[], atualiza ambos
+
+  mostrarToast("Lançado no Connect!", "sucesso");
+
+  // Salva em background — não bloqueia o usuário
+  salvarNaPlanilha(contratoAtivo, { [COL_NO_CONNECT]: "SIM" }).catch(() => {
+    // Reverte se a requisição falhar
+    contratoAtivo.noConnect = "";
     document.getElementById("connect-footer").innerHTML =
-      `<div class="connect-lancado"><i data-lucide="check-circle" class="icon icon-sm"></i> Lançado no Connect</div>`;
-    renderIcons();
-    mostrarToast("Marcado como lançado no Connect!", "sucesso");
-  } catch {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Marcar como lançado no Connect";
+      `<button class="btn-marcar-connect" onclick="marcarNoConnect()"><i data-lucide="check" class="icon icon-sm"></i> Marcar como lançado no Connect</button>`;
+    if (tr) {
+      const cell = tr.querySelector(".col-connect");
+      if (cell) cell.innerHTML = `<span class="badge-connect-pendente" title="Pendente no Connect">—</span>`;
     }
-    mostrarToast("Erro ao salvar. Tente novamente.", "erro");
-  }
+    renderIcons();
+    mostrarToast("Falha ao salvar no Connect. Tente novamente.", "erro");
+  });
 }
 
 function fecharModalConnect() {
@@ -2542,7 +2553,92 @@ function abrirModalPorId(id) {
   if (c) abrirModal(c);
 }
 
+// Classifica contrato como "opcao", "inad" ou "outro"
+function categoriaTipo(c) {
+  const t = (c.tipoDesconexao || "").toLowerCase();
+  if (t.includes("inad")) return "inad";
+  if (t.includes("op")) return "opcao";
+  return "outro";
+}
+
+function calcularICGPorCidade(lista) {
+  const mapa = {};
+  lista.forEach((c) => {
+    const cidade = c.cidade || "—";
+    if (!mapa[cidade]) {
+      mapa[cidade] = {
+        cidade,
+        mix:   { desc: 0, rec: 0 },
+        opcao: { desc: 0, rec: 0 },
+        inad:  { desc: 0, rec: 0 },
+      };
+    }
+    const r = mapa[cidade];
+    const recuperado = c.status === "Retirado" || c.status === "Parcial";
+    r.mix.desc++;
+    if (recuperado) r.mix.rec++;
+    const cat = categoriaTipo(c);
+    if (cat === "opcao") { r.opcao.desc++; if (recuperado) r.opcao.rec++; }
+    else if (cat === "inad") { r.inad.desc++;  if (recuperado) r.inad.rec++; }
+  });
+  return Object.values(mapa).sort((a, b) => a.cidade.localeCompare(b.cidade));
+}
+
+function icgCells(grp, meta) {
+  if (!grp.desc) return `<td>—</td><td>—</td><td>—</td><td>—</td>`;
+  const pend = grp.desc - grp.rec;
+  const icg  = grp.rec / grp.desc;
+  const icgPct = (icg * 100).toFixed(2).replace(".", ",") + "%";
+  const icgCls = icg >= meta ? "num-retirado" : icg >= meta * 0.8 ? "num-pendente" : "num-quebra";
+  return `<td>${grp.rec}</td><td>${pend}</td><td class="${icgCls}">${icgPct}</td><td>—</td>`;
+}
+
+function icgCellsMix(grp, meta) {
+  if (!grp.desc) return `<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>`;
+  const pend = grp.desc - grp.rec;
+  const icg  = grp.rec / grp.desc;
+  const falta = Math.max(0, meta - icg);
+  const icgPct  = (icg  * 100).toFixed(2).replace(".", ",") + "%";
+  const faltaPct = falta > 0 ? (falta * 100).toFixed(1).replace(".", ",") + "%" : "✓";
+  const icgCls = icg >= meta ? "num-retirado" : icg >= meta * 0.8 ? "num-pendente" : "num-quebra";
+  return `<td>${grp.desc}</td><td>${grp.rec}</td><td>${pend}</td><td class="${icgCls}">${icgPct}</td><td class="${icgCls}">${faltaPct}</td>`;
+}
+
 function renderizarRelatorioHTML() {
+  const lista  = getContratosAdmin();
+  const dados  = calcularICGPorCidade(lista);
+  const META_MIX   = 0.78;
+  const META_OPCAO = 1.00;
+  const META_INAD  = 0.70;
+
+  const linhas = dados.map((r) => `
+    <tr>
+      <td class="icg-cidade">${r.cidade}</td>
+      ${icgCellsMix(r.mix,   META_MIX)}
+      ${icgCells(r.opcao, META_OPCAO)}
+      ${icgCells(r.inad,  META_INAD)}
+    </tr>`).join("");
+
+  const tabelaHTML = `
+    <div class="tabela-scroll">
+      <table class="admin-table icg-table">
+        <thead>
+          <tr class="icg-head-grupo">
+            <th rowspan="2" class="icg-th-cidade">Cidade</th>
+            <th colspan="5" class="icg-head-mix">MIX — DESC OPÇÃO + DESC INAD</th>
+            <th colspan="4" class="icg-head-opcao">DESCONEXÃO POR OPÇÃO</th>
+            <th colspan="4" class="icg-head-inad">DESCONEXÃO POR INAD</th>
+          </tr>
+          <tr class="icg-head-sub">
+            <th>Desconect.</th><th>Recuper.</th><th>Pendentes</th><th>ICG</th><th>Falta p/Meta</th>
+            <th>Recuper.</th><th>Pendentes</th><th>ICG</th><th>—</th>
+            <th>Recuper.</th><th>Pendentes</th><th>ICG</th><th>—</th>
+          </tr>
+        </thead>
+        <tbody>${linhas || '<tr><td colspan="14" class="tabela-vazia">Nenhum dado</td></tr>'}</tbody>
+      </table>
+    </div>`;
+
   const periodos = calcularEficienciaPeriodos();
   const linhasEfic = periodos
     .map((p) => {
@@ -2570,12 +2666,12 @@ function renderizarRelatorioHTML() {
 
   return `
     <div class="admin-secao">
-      <h3 class="admin-secao-titulo">Exportar CSV</h3>
-      <p class="relatorio-desc">
-        Exporta todos os contratos conforme os filtros acima em formato CSV (compatível com Excel).
-        Inclui status, técnico responsável, data de execução e demais campos.
-      </p>
-      <button class="btn btn-relatorio" onclick="baixarCSV()"><i data-lucide="download" class="icon icon-sm"></i> Baixar CSV</button>
+      <h3 class="admin-secao-titulo">ICG por Cidade</h3>
+      ${tabelaHTML}
+      <div class="relatorio-btns">
+        <button class="btn btn-relatorio" onclick="baixarCSVicg()"><i data-lucide="download" class="icon icon-sm"></i> Baixar ICG CSV</button>
+        <button class="btn btn-relatorio btn-relatorio-sec" onclick="baixarCSV()"><i data-lucide="download" class="icon icon-sm"></i> Baixar CSV Completo</button>
+      </div>
     </div>
 
     <div class="admin-secao">
@@ -2665,6 +2761,50 @@ function baixarCSV() {
   const a = document.createElement("a");
   a.href = url;
   a.download = `backlog-safra-${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function baixarCSVicg() {
+  const lista  = getContratosAdmin();
+  const dados  = calcularICGPorCidade(lista);
+  const META_MIX   = 0.78;
+  const META_OPCAO = 1.00;
+  const META_INAD  = 0.70;
+
+  const pct = (v, d) => d > 0 ? ((v / d) * 100).toFixed(1) + "%" : "—";
+  const falta = (icg, meta, d) => {
+    if (d === 0) return "—";
+    const atual = icg / d;
+    const diff = meta - atual;
+    return diff > 0 ? Math.ceil(diff * d) + " contr." : "Meta atingida";
+  };
+
+  const cabecalho = [
+    "Cidade",
+    "MIX Desconect.","MIX Recuper.","MIX Pendentes","MIX ICG%","MIX Falta p/Meta",
+    "OPÇ Recuper.","OPÇ Pendentes","OPÇ ICG%",
+    "INAD Recuper.","INAD Pendentes","INAD ICG%",
+  ].join(";");
+
+  const linhas = dados.map((r) => {
+    const mixPend = r.mix.desc - r.mix.rec;
+    const opPend  = r.opcao.desc - r.opcao.rec;
+    const inadPend = r.inad.desc - r.inad.rec;
+    return [
+      r.cidade,
+      r.mix.desc, r.mix.rec, mixPend, pct(r.mix.rec, r.mix.desc), falta(r.mix.rec, META_MIX, r.mix.desc),
+      r.opcao.rec, opPend, pct(r.opcao.rec, r.opcao.desc),
+      r.inad.rec, inadPend, pct(r.inad.rec, r.inad.desc),
+    ].map((v) => `"${String(v || 0).replace(/"/g, '""')}"`).join(";");
+  });
+
+  const csv = [cabecalho, ...linhas].join("\n");
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `icg-${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
