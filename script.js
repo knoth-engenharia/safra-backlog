@@ -4,7 +4,7 @@
 // URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
 // Ver instruções em gas/Codigo.gs
 const GAS_URL =
-  "https://script.google.com/macros/s/AKfycbxLp3J8hUoymlOYCmjgzCgw7IYXsU8Ud6DhOTGU4AVCQPWn1gWXXlRSBRxuJf79Ao6m/exec";
+  "https://script.google.com/macros/s/AKfycbzrqGSjjs9DqPb49kgJ2wk2Utp1ruz_PyKMMRHUNe18AYyiPB2oKnn-xluJfyuTjVCv/exec";
 
 // Chave gratuita do ImgBB — obter em: https://api.imgbb.com
 // Criar conta, gerar chave API e colar aqui
