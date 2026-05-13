@@ -4,7 +4,7 @@
 // URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
 // Ver instruções em gas/Codigo.gs
 const GAS_URL =
-  "https://script.google.com/macros/s/AKfycbyL-0-fXKLi8VF3xmzA_u2C4RJ0x4mnrvLhj6GGcXPWdgaNqt7L9-KMHGiWXMNqgJgW/exec";
+  "https://script.google.com/macros/s/AKfycbxLp3J8hUoymlOYCmjgzCgw7IYXsU8Ud6DhOTGU4AVCQPWn1gWXXlRSBRxuJf79Ao6m/exec";
 
 // Chave gratuita do ImgBB — obter em: https://api.imgbb.com
 // Criar conta, gerar chave API e colar aqui
@@ -653,12 +653,15 @@ function enviarHeartbeat(isLogin = false) {
   const { usuario } = tecnicoLogado() || {};
   if (!usuario) return;
   const fd = new FormData();
-  fd.append("payload", JSON.stringify({
-    action: "heartbeat",
-    usuario,
-    ts: tsAgora(),
-    isLogin,
-  }));
+  fd.append(
+    "payload",
+    JSON.stringify({
+      action: "heartbeat",
+      usuario,
+      ts: tsAgora(),
+      isLogin,
+    }),
+  );
   fetch(GAS_URL, { method: "POST", body: fd }).catch(() => {});
 }
 
@@ -700,7 +703,7 @@ function statusPresenca(str) {
   const ts = parseDateBR(str);
   if (!ts) return "nunca";
   const min = Math.floor((Date.now() - ts) / 60000);
-  if (min < 6)  return "online";
+  if (min < 6) return "online";
   if (min < 30) return "recente";
   if (min < 480) return "ausente";
   return "offline";
@@ -1351,8 +1354,8 @@ function aplicarFiltros() {
     const skipGeofiltro = ehMeuAgendamento(c);
     return (
       matchBusca &&
-      (skipGeofiltro || (!cidade || c.cidade === cidade)) &&
-      (skipGeofiltro || (!bairro || c.bairro === bairro)) &&
+      (skipGeofiltro || !cidade || c.cidade === cidade) &&
+      (skipGeofiltro || !bairro || c.bairro === bairro) &&
       (!status || c.status === status) &&
       (!tipo || c.tipoDesconexao === tipo) &&
       (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico) &&
@@ -1449,7 +1452,13 @@ function renderizarLista(lista) {
       const m = c.dataAgend?.match(/(\d{2})\/(\d{2})\/(\d{4})/);
       if (!m) return Infinity;
       const hm = c.horario?.match(/(\d{1,2})[h:](\d{2})/i);
-      return new Date(+m[3], +m[2] - 1, +m[1], hm ? +hm[1] : 23, hm ? +hm[2] : 59).getTime();
+      return new Date(
+        +m[3],
+        +m[2] - 1,
+        +m[1],
+        hm ? +hm[1] : 23,
+        hm ? +hm[2] : 59,
+      ).getTime();
     };
     const agendados = lista
       .filter(ehAgendado)
@@ -1629,7 +1638,8 @@ function criarCartaoHTML(c) {
     c.obs1?.trim().toUpperCase() === "AGENDADO" &&
     c.tecnicoDesig?.trim().toLowerCase() === usuario;
   const hojeStr = new Date().toLocaleDateString("pt-BR");
-  const amanhaDate = new Date(); amanhaDate.setDate(amanhaDate.getDate() + 1);
+  const amanhaDate = new Date();
+  amanhaDate.setDate(amanhaDate.getDate() + 1);
   const amanhaStr = amanhaDate.toLocaleDateString("pt-BR");
   const agendadoHoje = agendado && c.dataAgend?.trim() === hojeStr;
   const agendadoAmanha = agendado && c.dataAgend?.trim() === amanhaStr;
@@ -1641,8 +1651,10 @@ function criarCartaoHTML(c) {
     const m = c.dataAgend?.match(/(\d{2})\/(\d{2})\/(\d{4})/);
     if (m) {
       const d = new Date(+m[3], +m[2] - 1, +m[1]);
-      const dia = d.toLocaleDateString("pt-BR", { weekday: "short" })
-        .replace(".", "").toUpperCase();
+      const dia = d
+        .toLocaleDateString("pt-BR", { weekday: "short" })
+        .replace(".", "")
+        .toUpperCase();
       return dia;
     }
     return "AGENDADO";
@@ -2585,22 +2597,32 @@ function renderizarPresencaHTML(lista) {
     return `<div class="estado-vazio"><p>Nenhum técnico encontrado.</p></div>`;
   }
 
-  const LABEL = { online: "Online", recente: "Recente", ausente: "Ausente", offline: "Offline", nunca: "Nunca acessou" };
+  const LABEL = {
+    online: "Online",
+    recente: "Recente",
+    ausente: "Ausente",
+    offline: "Offline",
+    nunca: "Nunca acessou",
+  };
 
   const ordenada = [...lista].sort((a, b) => {
     const ordem = { online: 0, recente: 1, ausente: 2, offline: 3, nunca: 4 };
-    return (ordem[statusPresenca(a["ULTIMO_ACESSO"])] ?? 4) - (ordem[statusPresenca(b["ULTIMO_ACESSO"])] ?? 4);
+    return (
+      (ordem[statusPresenca(a["ULTIMO_ACESSO"])] ?? 4) -
+      (ordem[statusPresenca(b["ULTIMO_ACESSO"])] ?? 4)
+    );
   });
 
-  const cards = ordenada.map((t) => {
-    const acesso  = t["ULTIMO_ACESSO"] || "";
-    const login   = t["ULTIMO_LOGIN"]  || "";
-    const status  = statusPresenca(acesso);
-    const nome    = toTitleCase(t["NOME"] || t["USUARIO"] || "—");
-    const isAdm   = t["ADM"]?.trim().toUpperCase() === "SIM";
-    const cidades = t["CIDADES"]?.trim() || "Todas";
+  const cards = ordenada
+    .map((t) => {
+      const acesso = t["ULTIMO_ACESSO"] || "";
+      const login = t["ULTIMO_LOGIN"] || "";
+      const status = statusPresenca(acesso);
+      const nome = toTitleCase(t["NOME"] || t["USUARIO"] || "—");
+      const isAdm = t["ADM"]?.trim().toUpperCase() === "SIM";
+      const cidades = t["CIDADES"]?.trim() || "Todas";
 
-    return `
+      return `
       <div class="presenca-card presenca-${status}">
         <div class="presenca-dot-wrap">
           <span class="presenca-dot dot-${status}"></span>
@@ -2626,13 +2648,18 @@ function renderizarPresencaHTML(lista) {
         </div>
         <span class="presenca-status-label presenca-label-${status}">${LABEL[status]}</span>
       </div>`;
-  }).join("");
+    })
+    .join("");
 
-  const contadores = ["online","recente","ausente","offline","nunca"].map((s) => {
-    const n = ordenada.filter((t) => statusPresenca(t["ULTIMO_ACESSO"]) === s).length;
-    if (!n) return "";
-    return `<span class="presenca-resumo-item presenca-label-${s}">${LABEL[s]}: ${n}</span>`;
-  }).join("");
+  const contadores = ["online", "recente", "ausente", "offline", "nunca"]
+    .map((s) => {
+      const n = ordenada.filter(
+        (t) => statusPresenca(t["ULTIMO_ACESSO"]) === s,
+      ).length;
+      if (!n) return "";
+      return `<span class="presenca-resumo-item presenca-label-${s}">${LABEL[s]}: ${n}</span>`;
+    })
+    .join("");
 
   return `
     <div class="admin-secao">
