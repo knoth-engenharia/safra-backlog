@@ -634,8 +634,76 @@ function salvarSessao(tecnico) {
 }
 
 function encerrarSessao() {
+  pararHeartbeat();
   localStorage.removeItem(SESSAO_KEY);
   location.reload();
+}
+
+// =========================================
+// HEARTBEAT DE PRESENÇA
+// =========================================
+const HEARTBEAT_INTERVALO = 5 * 60 * 1000; // 5 min
+let _heartbeatTimer = null;
+
+function tsAgora() {
+  return new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+}
+
+function enviarHeartbeat(isLogin = false) {
+  const { usuario } = tecnicoLogado() || {};
+  if (!usuario) return;
+  const fd = new FormData();
+  fd.append("payload", JSON.stringify({
+    action: "heartbeat",
+    usuario,
+    ts: tsAgora(),
+    isLogin,
+  }));
+  fetch(GAS_URL, { method: "POST", body: fd }).catch(() => {});
+}
+
+function iniciarHeartbeat() {
+  enviarHeartbeat(true); // marca o login
+  _heartbeatTimer = setInterval(() => {
+    if (document.visibilityState === "visible") enviarHeartbeat();
+  }, HEARTBEAT_INTERVALO);
+  document.addEventListener("visibilitychange", _aoVoltar);
+}
+
+function _aoVoltar() {
+  if (document.visibilityState === "visible") enviarHeartbeat();
+}
+
+function pararHeartbeat() {
+  clearInterval(_heartbeatTimer);
+  document.removeEventListener("visibilitychange", _aoVoltar);
+}
+
+// ---- Tempo relativo legível ----
+function tempoRelativo(str) {
+  if (!str?.trim()) return "Nunca";
+  const ts = parseDateBR(str);
+  if (!ts) return "—";
+  const diff = Date.now() - ts;
+  if (diff < 0) return "Agora mesmo";
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "Agora mesmo";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  const d = Math.floor(h / 24);
+  return `há ${d} dia${d > 1 ? "s" : ""}`;
+}
+
+function statusPresenca(str) {
+  if (!str?.trim()) return "nunca";
+  const ts = parseDateBR(str);
+  if (!ts) return "nunca";
+  const min = Math.floor((Date.now() - ts) / 60000);
+  if (min < 6)  return "online";
+  if (min < 30) return "recente";
+  if (min < 480) return "ausente";
+  return "offline";
 }
 
 async function tentarLogin() {
@@ -989,6 +1057,7 @@ function iniciarApp() {
 
   configurarEventos();
   atualizarIndicadorOffline();
+  iniciarHeartbeat();
   carregarContratos();
 }
 
@@ -2484,11 +2553,104 @@ function renderizarAdmin() {
   const conteudo = document.getElementById("admin-conteudo");
   if (adminTabAtiva === "metricas")
     conteudo.innerHTML = renderizarMetricasHTML(lista);
-  else if (adminTabAtiva === "historico") {
+  else if (adminTabAtiva === "historico")
     conteudo.innerHTML = renderizarHistoricoHTML(lista);
-  } else if (adminTabAtiva === "relatorio")
+  else if (adminTabAtiva === "relatorio")
     conteudo.innerHTML = renderizarRelatorioHTML();
+  else if (adminTabAtiva === "tecnicos") {
+    conteudo.innerHTML = `<div class="estado-vazio presenca-carregando"><p><i data-lucide="loader" class="icon icon-sm"></i> Carregando presenças...</p></div>`;
+    renderIcons();
+    carregarPresenca().then((dados) => {
+      if (adminTabAtiva !== "tecnicos") return;
+      conteudo.innerHTML = renderizarPresencaHTML(dados);
+      renderIcons();
+    });
+    return;
+  }
   renderIcons();
+}
+
+async function carregarPresenca() {
+  try {
+    const resp = await fetch(`${GAS_URL}?action=presenca`);
+    const json = await resp.json();
+    return Array.isArray(json.data) ? json.data : [];
+  } catch {
+    return [];
+  }
+}
+
+function renderizarPresencaHTML(lista) {
+  if (!lista.length) {
+    return `<div class="estado-vazio"><p>Nenhum técnico encontrado.</p></div>`;
+  }
+
+  const LABEL = { online: "Online", recente: "Recente", ausente: "Ausente", offline: "Offline", nunca: "Nunca acessou" };
+
+  const ordenada = [...lista].sort((a, b) => {
+    const ordem = { online: 0, recente: 1, ausente: 2, offline: 3, nunca: 4 };
+    return (ordem[statusPresenca(a["ULTIMO_ACESSO"])] ?? 4) - (ordem[statusPresenca(b["ULTIMO_ACESSO"])] ?? 4);
+  });
+
+  const cards = ordenada.map((t) => {
+    const acesso  = t["ULTIMO_ACESSO"] || "";
+    const login   = t["ULTIMO_LOGIN"]  || "";
+    const status  = statusPresenca(acesso);
+    const nome    = toTitleCase(t["NOME"] || t["USUARIO"] || "—");
+    const isAdm   = t["ADM"]?.trim().toUpperCase() === "SIM";
+    const cidades = t["CIDADES"]?.trim() || "Todas";
+
+    return `
+      <div class="presenca-card presenca-${status}">
+        <div class="presenca-dot-wrap">
+          <span class="presenca-dot dot-${status}"></span>
+        </div>
+        <div class="presenca-info">
+          <div class="presenca-nome">
+            ${escHtml(nome)}
+            ${isAdm ? `<span class="presenca-badge-adm">ADM</span>` : ""}
+          </div>
+          <div class="presenca-detalhe">
+            <i data-lucide="activity" class="icon icon-xs"></i>
+            Último acesso: <strong>${escHtml(tempoRelativo(acesso))}</strong>
+            ${acesso ? `<span class="presenca-ts">${escHtml(acesso.split(",")[0])}</span>` : ""}
+          </div>
+          <div class="presenca-detalhe">
+            <i data-lucide="log-in" class="icon icon-xs"></i>
+            Último login: <span>${escHtml(tempoRelativo(login))}</span>
+          </div>
+          <div class="presenca-cidades">
+            <i data-lucide="map-pin" class="icon icon-xs"></i>
+            ${escHtml(cidades)}
+          </div>
+        </div>
+        <span class="presenca-status-label presenca-label-${status}">${LABEL[status]}</span>
+      </div>`;
+  }).join("");
+
+  const contadores = ["online","recente","ausente","offline","nunca"].map((s) => {
+    const n = ordenada.filter((t) => statusPresenca(t["ULTIMO_ACESSO"]) === s).length;
+    if (!n) return "";
+    return `<span class="presenca-resumo-item presenca-label-${s}">${LABEL[s]}: ${n}</span>`;
+  }).join("");
+
+  return `
+    <div class="admin-secao">
+      <div class="presenca-header">
+        <h3 class="admin-secao-titulo">Técnicos — Presença</h3>
+        <div class="presenca-resumo">${contadores}</div>
+        <button class="btn-presenca-refresh" onclick="renderizarAdmin()">
+          <i data-lucide="refresh-cw" class="icon icon-xs"></i> Atualizar
+        </button>
+      </div>
+      <p class="presenca-legenda">
+        <span class="dot-online presenca-dot-inline"></span> Online: ativo nos últimos 6 min &nbsp;
+        <span class="dot-recente presenca-dot-inline"></span> Recente: até 30 min &nbsp;
+        <span class="dot-ausente presenca-dot-inline"></span> Ausente: até 8h &nbsp;
+        <span class="dot-offline presenca-dot-inline"></span> Offline: mais de 8h
+      </p>
+      <div class="presenca-grid">${cards}</div>
+    </div>`;
 }
 
 function renderizarMetricasHTML(lista) {
