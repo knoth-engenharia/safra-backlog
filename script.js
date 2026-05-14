@@ -6,9 +6,10 @@
 const GAS_URL =
   "https://script.google.com/macros/s/AKfycbyFRh6mPanPQOWAXx0feolH9ToI6b_AFdhFmksvZb06OojihXKw8NUaXonnmAB9gEMK/exec";
 
-// Chave gratuita do ImgBB — obter em: https://api.imgbb.com
-// Criar conta, gerar chave API e colar aqui
-const IMGBB_API_KEY = "a6d2e3459a89a0c82016a47e177353b1";
+// Cloudinary — upload de fotos (plano gratuito: 25GB storage)
+// Como configurar: ver instruções abaixo de CLOUDINARY_UPLOAD_PRESET
+const CLOUDINARY_CLOUD_NAME = "dn8ffld8c"; // ex: "dxyz1234"
+const CLOUDINARY_UPLOAD_PRESET = "backlog-safra"; // ex: "backlog_safra"
 
 const COL_CODIGO_OS = "CODIGO_OS";
 const COL_DATA_EXEC = "DATA_EXEC";
@@ -19,11 +20,11 @@ const COL_BAIXA_SITE = "BAIXA_SITE";
 const COL_SERIAIS_RET = "SERIAIS_RETIRADOS";
 const COL_VISITAS = "VISITAS";
 const COL_NO_CONNECT = "NO_CONNECT";
-const COL_LAT_EXEC   = "LAT_EXEC";
-const COL_LNG_EXEC   = "LNG_EXEC";
+const COL_LAT_EXEC = "LAT_EXEC";
+const COL_LNG_EXEC = "LNG_EXEC";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "1.0";
+const APP_VERSION = "1.1";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -703,7 +704,6 @@ async function pedirPermissaoNotificacao() {
   return (await Notification.requestPermission()) === "granted";
 }
 
-
 function _dispararNotificacao(titulo, corpo, tag) {
   if (Notification.permission !== "granted") return;
   navigator.serviceWorker.ready
@@ -717,7 +717,9 @@ function _dispararNotificacao(titulo, corpo, tag) {
         data: { contratoId: tag },
       }),
     )
-    .catch(() => new Notification(titulo, { body: corpo, tag: `agend-${tag}` }));
+    .catch(
+      () => new Notification(titulo, { body: corpo, tag: `agend-${tag}` }),
+    );
 }
 
 // Checkpoints fixos do dia (horas)
@@ -763,7 +765,11 @@ async function agendarNotificacoesHoje() {
       c.dataAgend?.startsWith(hojeStr),
   );
   salvarAgendamentosNotifIDB(
-    agendadosHoje.map((c) => ({ id: c.id, dataAgend: c.dataAgend || "", status: c.status })),
+    agendadosHoje.map((c) => ({
+      id: c.id,
+      dataAgend: c.dataAgend || "",
+      status: c.status,
+    })),
   );
 
   _registrarPeriodicSync();
@@ -772,7 +778,14 @@ async function agendarNotificacoesHoje() {
 
   // Agenda um lembrete em cada checkpoint futuro do dia
   NOTIF_CHECKPOINTS.forEach((hora) => {
-    const dt = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), hora, 0, 0);
+    const dt = new Date(
+      hoje.getFullYear(),
+      hoje.getMonth(),
+      hoje.getDate(),
+      hora,
+      0,
+      0,
+    );
     const ms = dt.getTime() - Date.now();
     if (ms <= 0) return; // checkpoint já passou hoje
     _timersNotificacao.push(
@@ -790,7 +803,10 @@ async function agendarNotificacoesHoje() {
 }
 
 function _registrarPeriodicSync() {
-  if (!("serviceWorker" in navigator) || !("periodicSync" in ServiceWorkerRegistration.prototype))
+  if (
+    !("serviceWorker" in navigator) ||
+    !("periodicSync" in ServiceWorkerRegistration.prototype)
+  )
     return;
   navigator.serviceWorker.ready.then((reg) => {
     navigator.permissions
@@ -811,7 +827,10 @@ function _registrarPeriodicSync() {
 // =========================================
 async function capturarGeolocalizacao() {
   return new Promise((resolve) => {
-    if (!navigator.geolocation) { resolve(null); return; }
+    if (!navigator.geolocation) {
+      resolve(null);
+      return;
+    }
     const timer = setTimeout(() => resolve(null), 6000);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -821,7 +840,10 @@ async function capturarGeolocalizacao() {
           lng: pos.coords.longitude.toFixed(6),
         });
       },
-      () => { clearTimeout(timer); resolve(null); },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
       { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 },
     );
   });
@@ -998,7 +1020,11 @@ async function salvarAgendamentosNotifIDB(lista) {
   try {
     const db = await abrirIDB();
     const tx = db.transaction("notif_agendamentos", "readwrite");
-    tx.objectStore("notif_agendamentos").put({ chave: "pendentes", lista, ts: Date.now() });
+    tx.objectStore("notif_agendamentos").put({
+      chave: "pendentes",
+      lista,
+      ts: Date.now(),
+    });
   } catch {}
 }
 
@@ -1171,7 +1197,8 @@ let histSubView = "lista"; // "lista" | "dia"
 let _loadingCount = 0;
 function _setCarregando(delta) {
   _loadingCount = Math.max(0, _loadingCount + delta);
-  document.getElementById("loading-bar")
+  document
+    .getElementById("loading-bar")
     ?.classList.toggle("ativo", _loadingCount > 0);
 }
 
@@ -1261,12 +1288,16 @@ function _filtrarContratosPermitidos(lista) {
   if (cidades) {
     const permitidas = cidades.map((c) => c.toLowerCase());
     resultado = resultado.filter(
-      (c) => permitidas.includes(c.cidade.toLowerCase()) || (!adm && ehAgendadoParaMim(c)),
+      (c) =>
+        permitidas.includes(c.cidade.toLowerCase()) ||
+        (!adm && ehAgendadoParaMim(c)),
     );
   }
   if (!adm) {
     resultado = resultado.filter(
-      (c) => c.obs1?.trim().toUpperCase() !== "CLIENTE SOLICITA RETIRADA EM OUTRO ENDEREÇO",
+      (c) =>
+        c.obs1?.trim().toUpperCase() !==
+        "CLIENTE SOLICITA RETIRADA EM OUTRO ENDEREÇO",
     );
   }
   return resultado;
@@ -1320,7 +1351,9 @@ async function _fetchContratos(usuario, silencioso) {
       preencherFiltros();
       renderizarLista(contratos);
     } else {
-      mostrarErro("Sem conexão e sem cache disponível. Verifique sua internet.");
+      mostrarErro(
+        "Sem conexão e sem cache disponível. Verifique sua internet.",
+      );
     }
   } finally {
     _setCarregando(-1);
@@ -1960,9 +1993,10 @@ function abrirModal(contrato) {
     contrato.dataExec ||
     contrato.tecnicoExec ||
     contrato.obsExec;
-  const geoExecUrl = contrato.latExec && contrato.lngExec
-    ? `https://www.google.com/maps?q=${contrato.latExec},${contrato.lngExec}`
-    : null;
+  const geoExecUrl =
+    contrato.latExec && contrato.lngExec
+      ? `https://www.google.com/maps?q=${contrato.latExec},${contrato.lngExec}`
+      : null;
   const agendStr = [
     contrato.dataAgend,
     contrato.horario ? `às ${contrato.horario}` : "",
@@ -2157,13 +2191,17 @@ function criarAcoesHTML() {
 function _salvarEstadoModal(updates) {
   try {
     const raw = sessionStorage.getItem("safra_modal_state") || "{}";
-    sessionStorage.setItem("safra_modal_state",
-      JSON.stringify({ ...JSON.parse(raw), ...updates }));
+    sessionStorage.setItem(
+      "safra_modal_state",
+      JSON.stringify({ ...JSON.parse(raw), ...updates }),
+    );
   } catch {}
 }
 
 function _limparEstadoModal() {
-  try { sessionStorage.removeItem("safra_modal_state"); } catch {}
+  try {
+    sessionStorage.removeItem("safra_modal_state");
+  } catch {}
 }
 
 function _tentarRestaurarModal() {
@@ -2173,7 +2211,10 @@ function _tentarRestaurarModal() {
     const state = JSON.parse(raw);
     if (!state?.contratoId) return;
     const c = contratos.find((x) => x.id === state.contratoId);
-    if (!c || c.status !== "Pendente") { _limparEstadoModal(); return; }
+    if (!c || c.status !== "Pendente") {
+      _limparEstadoModal();
+      return;
+    }
     _limparEstadoModal(); // limpa antes de abrir para não restaurar em loop
     abrirModal(c);
     requestAnimationFrame(() => {
@@ -2183,10 +2224,15 @@ function _tentarRestaurarModal() {
           const el = document.getElementById("obs-exec-input");
           if (el && state.obs) el.value = state.obs;
           if (state.seriais) {
-            state.seriais.split(" / ").filter(Boolean).forEach((ser) => {
-              const chip = document.querySelector(`#seriais-selec [data-serial="${ser.trim()}"]`);
-              if (chip) chip.classList.add("serial-selecionado");
-            });
+            state.seriais
+              .split(" / ")
+              .filter(Boolean)
+              .forEach((ser) => {
+                const chip = document.querySelector(
+                  `#seriais-selec [data-serial="${ser.trim()}"]`,
+                );
+                if (chip) chip.classList.add("serial-selecionado");
+              });
           }
         });
       } else if (state.fluxo === "quebra") {
@@ -2199,12 +2245,19 @@ function _tentarRestaurarModal() {
         });
       }
     });
-  } catch { _limparEstadoModal(); }
+  } catch {
+    _limparEstadoModal();
+  }
 }
 
 // --- Fluxo Retirado ---
 function mostrarConfirmacaoRetirado() {
-  _salvarEstadoModal({ contratoId: contratoAtivo?.id, fluxo: "retirado", obs: "", seriais: "" });
+  _salvarEstadoModal({
+    contratoId: contratoAtivo?.id,
+    fluxo: "retirado",
+    obs: "",
+    seriais: "",
+  });
   document.getElementById("acoes-modal").innerHTML = `
     ${criarSeletorSeriaisHTML(contratoAtivo?.terminais || "")}
     <label class="detalhe-label" style="margin-bottom:6px;display:block">Observação (opcional)</label>
@@ -2245,7 +2298,12 @@ async function confirmarRetirado() {
 
 // --- Fluxo Quebra ---
 function mostrarSeletorQuebra() {
-  _salvarEstadoModal({ contratoId: contratoAtivo?.id, fluxo: "quebra", obs: "", codigoQuebra: "" });
+  _salvarEstadoModal({
+    contratoId: contratoAtivo?.id,
+    fluxo: "quebra",
+    obs: "",
+    codigoQuebra: "",
+  });
   const opcoes = CODIGOS_QUEBRA.map(
     (c) => `<option value="${c}">${c}</option>`,
   ).join("");
@@ -2288,11 +2346,11 @@ async function executarSalvamento(camposBase, novoStatus) {
   const obsExec =
     document.getElementById("obs-exec-input")?.value?.trim() || "";
   const dataExec = formatarDataExec();
-  const tecnico = tecnicoLogado()?.nome || "";
+  const tecnico = tecnicoLogado()?.usuario || "";
   const visitasAnt = contratoAtivo.visitas || "";
   const novasVisitas = visitasAnt ? `${visitasAnt}|${dataExec}` : dataExec;
   const fotosParaUpload = [..._fotoArquivos]; // captura antes de fechar modal
-  const contratoParaSalvar = contratoAtivo;   // captura ref antes de fecharModal()
+  const contratoParaSalvar = contratoAtivo; // captura ref antes de fecharModal()
 
   // Atualização otimista — fecha modal e atualiza lista imediatamente
   const idx = contratos.findIndex((c) => c.id === contratoAtivo.id);
@@ -2310,7 +2368,7 @@ async function executarSalvamento(camposBase, novoStatus) {
       visitas: novasVisitas,
     };
   }
-  fecharModal();   // também chama _limparEstadoModal()
+  fecharModal(); // também chama _limparEstadoModal()
   aplicarFiltros();
 
   // GPS + fotos + save em background — loading bar indica progresso
@@ -2319,7 +2377,11 @@ async function executarSalvamento(camposBase, novoStatus) {
     const geoPromise = capturarGeolocalizacao();
 
     let fotoExec = "";
-    if (IMGBB_API_KEY !== "SUA_CHAVE_IMGBB_AQUI" && fotosParaUpload.length && navigator.onLine) {
+    if (
+      CLOUDINARY_CLOUD_NAME !== "SEU_CLOUD_NAME" &&
+      fotosParaUpload.length &&
+      navigator.onLine
+    ) {
       try {
         fotoExec = await uploadTodasFotos(fotosParaUpload);
       } catch (e) {
@@ -2345,12 +2407,14 @@ async function executarSalvamento(camposBase, novoStatus) {
     // Atualiza com valores reais (foto URL e GPS) após confirmação do servidor
     if (idx !== -1) {
       if (fotoExec) contratos[idx].fotoExec = fotoExec;
-      if (geo) { contratos[idx].latExec = geo.lat; contratos[idx].lngExec = geo.lng; }
+      if (geo) {
+        contratos[idx].latExec = geo.lat;
+        contratos[idx].lngExec = geo.lng;
+      }
     }
     salvarContratosIDB(contratos, tecnicoLogado()?.usuario);
     agendarNotificacoesHoje();
     mostrarToast("Baixa registrada com sucesso.", "sucesso");
-
   } catch (erro) {
     if (erro instanceof OfflineError) {
       if (idx !== -1) contratos[idx]._pendente = true;
@@ -2435,17 +2499,15 @@ function criarBotoesPhone(c) {
 // =========================================
 async function uploadFoto(file) {
   const form = new FormData();
-  form.append("image", file);
+  form.append("file", file);
+  form.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
   const resp = await fetch(
-    `https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`,
-    {
-      method: "POST",
-      body: form,
-    },
+    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+    { method: "POST", body: form },
   );
   if (!resp.ok) throw new Error("Falha no upload da foto");
   const json = await resp.json();
-  return json.data.url;
+  return json.secure_url;
 }
 
 async function uploadTodasFotos(arquivos) {
@@ -2468,8 +2530,13 @@ async function comprimirFoto(file, maxLado = 1920, qualidade = 0.82) {
       URL.revokeObjectURL(url);
       let { width: w, height: h } = img;
       if (w > maxLado || h > maxLado) {
-        if (w >= h) { h = Math.round(h * maxLado / w); w = maxLado; }
-        else { w = Math.round(w * maxLado / h); h = maxLado; }
+        if (w >= h) {
+          h = Math.round((h * maxLado) / w);
+          w = maxLado;
+        } else {
+          w = Math.round((w * maxLado) / h);
+          h = maxLado;
+        }
       }
       const canvas = document.createElement("canvas");
       canvas.width = w;
@@ -2477,6 +2544,10 @@ async function comprimirFoto(file, maxLado = 1920, qualidade = 0.82) {
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
       canvas.toBlob(
         (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          } // toBlob falhou — usa original
           const nome = file.name.replace(/\.\w+$/, ".jpg");
           resolve(new File([blob], nome, { type: "image/jpeg" }));
         },
@@ -2484,7 +2555,10 @@ async function comprimirFoto(file, maxLado = 1920, qualidade = 0.82) {
         qualidade,
       );
     };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
     img.src = url;
   });
 }
@@ -2512,7 +2586,8 @@ function configurarPreviewFotos() {
 
   async function adicionarFotos(files) {
     const preview = document.getElementById("foto-preview");
-    if (preview) preview.innerHTML = `<span class="foto-comprimindo">Processando...</span>`;
+    if (preview)
+      preview.innerHTML = `<span class="foto-comprimindo">Processando...</span>`;
     const comprimidos = await Promise.all(Array.from(files).map(comprimirFoto));
     _fotoArquivos.push(...comprimidos);
     renderizarPreviewFotos();
@@ -2521,33 +2596,35 @@ function configurarPreviewFotos() {
   const camera = document.getElementById("foto-camera");
   const galeria = document.getElementById("foto-galeria");
   if (camera)
-    camera.addEventListener("change", () => adicionarFotos(camera.files));
+    camera.addEventListener("change", (e) =>
+      adicionarFotos(Array.from(e.target.files)),
+    );
   if (galeria)
-    galeria.addEventListener("change", () => adicionarFotos(galeria.files));
+    galeria.addEventListener("change", (e) =>
+      adicionarFotos(Array.from(e.target.files)),
+    );
 }
 
 function renderizarPreviewFotos() {
   const preview = document.getElementById("foto-preview");
   if (!preview) return;
-  // Revoga URLs anteriores para não vazar memória
-  preview.querySelectorAll("img[data-obj-url]").forEach((img) => {
-    URL.revokeObjectURL(img.src);
-  });
   preview.innerHTML = "";
   _fotoArquivos.forEach((file, idx) => {
     const wrap = document.createElement("div");
     wrap.className = "foto-thumb-wrap";
     const img = document.createElement("img");
-    const objUrl = URL.createObjectURL(file);
-    img.src = objUrl;
-    img.dataset.objUrl = "1";
     img.className = "foto-thumb-preview";
+    // FileReader (data URL) é mais confiável que ObjectURL para preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
     const btn = document.createElement("button");
     btn.className = "foto-thumb-remove";
     btn.title = "Remover";
     btn.textContent = "×";
     btn.addEventListener("click", () => {
-      URL.revokeObjectURL(objUrl);
       _fotoArquivos.splice(idx, 1);
       renderizarPreviewFotos();
     });
@@ -2820,7 +2897,9 @@ function renderizarHistoricoPessoal() {
   const conteudo = document.getElementById("mh-conteudo");
   if (!conteudo) return;
   const statusFiltro = document.getElementById("mh-filter-status")?.value || "";
-  const busca = (document.getElementById("mh-search")?.value || "").toLowerCase();
+  const busca = (
+    document.getElementById("mh-search")?.value || ""
+  ).toLowerCase();
   const { usuario } = tecnicoLogado() || {};
   const usuarioLow = usuario?.trim().toLowerCase() || "";
 
@@ -2830,13 +2909,16 @@ function renderizarHistoricoPessoal() {
     if (c.tecnicoExec?.trim().toLowerCase() !== usuarioLow) return false;
     if (statusFiltro && c.status !== statusFiltro) return false;
     if (busca) {
-      const texto = `${c.contrato} ${c.nome} ${c.endereco} ${c.cidade}`.toLowerCase();
+      const texto =
+        `${c.contrato} ${c.nome} ${c.endereco} ${c.cidade}`.toLowerCase();
       if (!texto.includes(busca)) return false;
     }
     return true;
   });
 
-  lista = lista.sort((a, b) => parseDateBR(b.dataExec) - parseDateBR(a.dataExec));
+  lista = lista.sort(
+    (a, b) => parseDateBR(b.dataExec) - parseDateBR(a.dataExec),
+  );
 
   if (!lista.length) {
     conteudo.innerHTML = `<div class="estado-vazio"><p>Nenhuma execução encontrada.</p></div>`;
@@ -2848,17 +2930,22 @@ function renderizarHistoricoPessoal() {
   const totPar = lista.filter((c) => c.status === "Parcial").length;
   const totQbr = lista.filter((c) => c.status === "Quebra").length;
 
-  const itens = lista.map((c) => {
-    const stCls = statusParaClasse(c.status);
-    const connectBadge = c.noConnect
-      ? `<span class="mh-badge-connect">Connect ✓</span>` : "";
-    const seriais = c.seriaisRet
-      ? `<div class="mh-seriais"><i data-lucide="package" class="icon icon-xs"></i> ${escHtml(c.seriaisRet)}</div>` : "";
-    const obs = c.obsExec
-      ? `<div class="mh-obs">${escHtml(c.obsExec)}</div>` : "";
-    const fotos = c.fotoExec
-      ? `<span class="mh-badge-foto"><i data-lucide="camera" class="icon icon-xs"></i> ${c.fotoExec.split("|").filter(Boolean).length} foto(s)</span>` : "";
-    return `<div class="mh-item" onclick="abrirModalPorId('${escHtml(c.id)}')">
+  const itens = lista
+    .map((c) => {
+      const stCls = statusParaClasse(c.status);
+      const connectBadge = c.noConnect
+        ? `<span class="mh-badge-connect">Connect ✓</span>`
+        : "";
+      const seriais = c.seriaisRet
+        ? `<div class="mh-seriais"><i data-lucide="package" class="icon icon-xs"></i> ${escHtml(c.seriaisRet)}</div>`
+        : "";
+      const obs = c.obsExec
+        ? `<div class="mh-obs">${escHtml(c.obsExec)}</div>`
+        : "";
+      const fotos = c.fotoExec
+        ? `<span class="mh-badge-foto"><i data-lucide="camera" class="icon icon-xs"></i> ${c.fotoExec.split("|").filter(Boolean).length} foto(s)</span>`
+        : "";
+      return `<div class="mh-item" onclick="abrirModalPorId('${escHtml(c.id)}')">
       <div class="mh-item-header">
         <span class="badge ${stCls}">${escHtml(c.status)}</span>
         <span class="mh-data">${escHtml(c.dataExec || "—")}</span>
@@ -2870,7 +2957,8 @@ function renderizarHistoricoPessoal() {
       </div>
       ${seriais}${obs}
     </div>`;
-  }).join("");
+    })
+    .join("");
 
   conteudo.innerHTML = `
     <div class="mh-resumo">
@@ -3158,7 +3246,11 @@ function renderizarHistoricoHTML(lista) {
   const baixas = lista
     .filter((c) => {
       if (filtroStatus === "Todos")
-        return c.status === "Retirado" || c.status === "Quebra" || c.status === "Parcial";
+        return (
+          c.status === "Retirado" ||
+          c.status === "Quebra" ||
+          c.status === "Parcial"
+        );
       return c.status === filtroStatus;
     })
     .filter((c) => filtroSite !== "Site" || c.baixaSite === "Sim")
@@ -3177,9 +3269,10 @@ function renderizarHistoricoHTML(lista) {
   const linhas = baixas
     .map((c) => {
       const cls = statusParaClasse(c.status);
-      const viaSite = c.baixaSite === "Sim"
-        ? `<span class="badge-site-sim" title="Baixa registrada pelo App">App</span>`
-        : `<span class="badge-site-nao">—</span>`;
+      const viaSite =
+        c.baixaSite === "Sim"
+          ? `<span class="badge-site-sim" title="Baixa registrada pelo App">App</span>`
+          : `<span class="badge-site-nao">—</span>`;
       const connectBadge = c.noConnect
         ? `<span class="badge-connect-ok" title="Lançado no Connect">✓</span>`
         : `<span class="badge-connect-pendente" title="Pendente no Connect">—</span>`;
@@ -3222,7 +3315,12 @@ function renderizarHistoricoPosDiaHTML(lista) {
 
   const comExec = lista.filter((c) => {
     if (!c.dataExec) return false;
-    if (c.status !== "Retirado" && c.status !== "Parcial" && c.status !== "Quebra") return false;
+    if (
+      c.status !== "Retirado" &&
+      c.status !== "Parcial" &&
+      c.status !== "Quebra"
+    )
+      return false;
     const dt = parseDateBR(c.dataExec);
     if (!dt || dt < umMesAtras) return false;
     if (filtroSite === "Site" && c.baixaSite !== "Sim") return false;
@@ -3248,18 +3346,26 @@ function renderizarHistoricoPosDiaHTML(lista) {
     else if (c.status === "Quebra") porDia[dia].quebra++;
   });
 
-  const dias = Object.entries(porDia).sort(([a], [b]) => parseDateBR(b) - parseDateBR(a));
+  const dias = Object.entries(porDia).sort(
+    ([a], [b]) => parseDateBR(b) - parseDateBR(a),
+  );
 
-  const totRet  = dias.reduce((s, [, d]) => s + d.retirado, 0);
-  const totPar  = dias.reduce((s, [, d]) => s + d.parcial, 0);
-  const totQbr  = dias.reduce((s, [, d]) => s + d.quebra, 0);
+  const totRet = dias.reduce((s, [, d]) => s + d.retirado, 0);
+  const totPar = dias.reduce((s, [, d]) => s + d.parcial, 0);
+  const totQbr = dias.reduce((s, [, d]) => s + d.quebra, 0);
   const totGeral = totRet + totPar + totQbr;
 
-  const linhas = dias.map(([dia, d]) => {
-    const total = d.retirado + d.parcial + d.quebra;
-    const taxaPct = Math.round(((d.retirado + d.parcial) / total) * 100);
-    const taxaCls = taxaPct >= 70 ? "num-retirado" : taxaPct >= 50 ? "num-pendente" : "num-quebra";
-    return `<tr>
+  const linhas = dias
+    .map(([dia, d]) => {
+      const total = d.retirado + d.parcial + d.quebra;
+      const taxaPct = Math.round(((d.retirado + d.parcial) / total) * 100);
+      const taxaCls =
+        taxaPct >= 70
+          ? "num-retirado"
+          : taxaPct >= 50
+            ? "num-pendente"
+            : "num-quebra";
+      return `<tr>
       <td class="col-data-hist">${escHtml(dia)}</td>
       <td class="num-retirado">${d.retirado}</td>
       <td style="color:#8b5cf6;font-weight:700">${d.parcial || "—"}</td>
@@ -3267,7 +3373,8 @@ function renderizarHistoricoPosDiaHTML(lista) {
       <td><strong>${total}</strong></td>
       <td class="${taxaCls}">${taxaPct}%</td>
     </tr>`;
-  }).join("");
+    })
+    .join("");
 
   return `
     <div class="admin-secao">
@@ -3365,19 +3472,33 @@ function calcularICGPorCidadeViaSite(lista) {
   lista.forEach((c) => {
     const cidade = c.cidade || "—";
     if (!mapa[cidade])
-      mapa[cidade] = { cidade, mix: { desc: 0, rec: 0 }, opcao: { desc: 0, rec: 0 }, inad: { desc: 0, rec: 0 } };
+      mapa[cidade] = {
+        cidade,
+        mix: { desc: 0, rec: 0 },
+        opcao: { desc: 0, rec: 0 },
+        inad: { desc: 0, rec: 0 },
+      };
     const r = mapa[cidade];
     const isPendente = c.status === "Pendente";
     const isViaSite = c.baixaSite === "Sim";
     const executadoViaSite =
-      (c.status === "Retirado" || c.status === "Parcial" || c.status === "Quebra") && isViaSite;
+      (c.status === "Retirado" ||
+        c.status === "Parcial" ||
+        c.status === "Quebra") &&
+      isViaSite;
     if (!isPendente && !executadoViaSite) return;
-    const recuperado = (c.status === "Retirado" || c.status === "Parcial") && isViaSite;
+    const recuperado =
+      (c.status === "Retirado" || c.status === "Parcial") && isViaSite;
     r.mix.desc++;
     if (recuperado) r.mix.rec++;
     const cat = categoriaTipo(c);
-    if (cat === "opcao") { r.opcao.desc++; if (recuperado) r.opcao.rec++; }
-    else if (cat === "inad") { r.inad.desc++; if (recuperado) r.inad.rec++; }
+    if (cat === "opcao") {
+      r.opcao.desc++;
+      if (recuperado) r.opcao.rec++;
+    } else if (cat === "inad") {
+      r.inad.desc++;
+      if (recuperado) r.inad.rec++;
+    }
   });
   return Object.values(mapa).sort((a, b) => a.cidade.localeCompare(b.cidade));
 }
@@ -3414,11 +3535,13 @@ function icgCellsMix(grp, meta) {
 }
 
 function renderizarRelatorioHTML() {
-  const filtroSiteRel = document.getElementById("adm-filter-rel-site")?.value || "Todos";
+  const filtroSiteRel =
+    document.getElementById("adm-filter-rel-site")?.value || "Todos";
   const lista = getContratosAdmin();
-  const dados = filtroSiteRel === "Site"
-    ? calcularICGPorCidadeViaSite(lista)
-    : calcularICGPorCidade(lista);
+  const dados =
+    filtroSiteRel === "Site"
+      ? calcularICGPorCidadeViaSite(lista)
+      : calcularICGPorCidade(lista);
   const META_MIX = 0.78;
   const META_OPCAO = 1.0;
   const META_INAD = 0.7;
@@ -3462,9 +3585,10 @@ function renderizarRelatorioHTML() {
       </table>
     </div>`;
 
-  const periodos = filtroSiteRel === "Site"
-    ? calcularEficienciaPeriodosViaSite()
-    : calcularEficienciaPeriodos();
+  const periodos =
+    filtroSiteRel === "Site"
+      ? calcularEficienciaPeriodosViaSite()
+      : calcularEficienciaPeriodos();
   const linhasEfic = periodos
     .map((p) => {
       const taxa =
@@ -3554,12 +3678,22 @@ function calcularEficienciaPeriodosViaSite() {
     const isPendente = c.status === "Pendente";
     const isViaSite = c.baixaSite === "Sim";
     const executadoViaSite =
-      (c.status === "Retirado" || c.status === "Parcial" || c.status === "Quebra") && isViaSite;
+      (c.status === "Retirado" ||
+        c.status === "Parcial" ||
+        c.status === "Quebra") &&
+      isViaSite;
     if (!isPendente && !executadoViaSite) return;
     const chave = `${m[3]}-${m[2]}`;
     const label = `${m[2]}/${m[3]}`;
     if (!meses[chave])
-      meses[chave] = { label, total: 0, retirados: 0, quebras: 0, pendentes: 0, parciais: 0 };
+      meses[chave] = {
+        label,
+        total: 0,
+        retirados: 0,
+        quebras: 0,
+        pendentes: 0,
+        parciais: 0,
+      };
     meses[chave].total++;
     if (c.status === "Retirado" && isViaSite) meses[chave].retirados++;
     else if (c.status === "Quebra" && isViaSite) meses[chave].quebras++;
@@ -3763,10 +3897,18 @@ function configurarEventos() {
     if (tr) abrirModalPorId(tr.dataset.id);
   });
   document.getElementById("btn-admin").addEventListener("click", abrirAdmin);
-  document.getElementById("btn-meu-historico")?.addEventListener("click", abrirHistoricoPessoal);
-  document.getElementById("btn-voltar-historico")?.addEventListener("click", fecharHistoricoPessoal);
-  document.getElementById("mh-filter-status")?.addEventListener("change", renderizarHistoricoPessoal);
-  document.getElementById("mh-search")?.addEventListener("input", renderizarHistoricoPessoal);
+  document
+    .getElementById("btn-meu-historico")
+    ?.addEventListener("click", abrirHistoricoPessoal);
+  document
+    .getElementById("btn-voltar-historico")
+    ?.addEventListener("click", fecharHistoricoPessoal);
+  document
+    .getElementById("mh-filter-status")
+    ?.addEventListener("change", renderizarHistoricoPessoal);
+  document
+    .getElementById("mh-search")
+    ?.addEventListener("input", renderizarHistoricoPessoal);
   document
     .getElementById("btn-voltar-lista")
     .addEventListener("click", voltarLista);
