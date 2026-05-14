@@ -2182,6 +2182,12 @@ function _tentarRestaurarModal() {
         requestAnimationFrame(() => {
           const el = document.getElementById("obs-exec-input");
           if (el && state.obs) el.value = state.obs;
+          if (state.seriais) {
+            state.seriais.split(" / ").filter(Boolean).forEach((ser) => {
+              const chip = document.querySelector(`#seriais-selec [data-serial="${ser.trim()}"]`);
+              if (chip) chip.classList.add("serial-selecionado");
+            });
+          }
         });
       } else if (state.fluxo === "quebra") {
         mostrarSeletorQuebra();
@@ -2198,7 +2204,7 @@ function _tentarRestaurarModal() {
 
 // --- Fluxo Retirado ---
 function mostrarConfirmacaoRetirado() {
-  _salvarEstadoModal({ contratoId: contratoAtivo?.id, fluxo: "retirado", obs: "" });
+  _salvarEstadoModal({ contratoId: contratoAtivo?.id, fluxo: "retirado", obs: "", seriais: "" });
   document.getElementById("acoes-modal").innerHTML = `
     ${criarSeletorSeriaisHTML(contratoAtivo?.terminais || "")}
     <label class="detalhe-label" style="margin-bottom:6px;display:block">Observação (opcional)</label>
@@ -2596,12 +2602,14 @@ function criarSeletorSeriaisHTML(terminais) {
 
 function toggleSerial(el) {
   el.classList.toggle("serial-selecionado");
+  _salvarEstadoModal({ seriais: getSeriaisSelecionados() });
 }
 
 function selecionarTodosSeriais() {
   document
     .querySelectorAll("#seriais-selec .serial-selec")
     .forEach((el) => el.classList.add("serial-selecionado"));
+  _salvarEstadoModal({ seriais: getSeriaisSelecionados() });
 }
 
 function getSeriaisSelecionados() {
