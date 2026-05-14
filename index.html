@@ -27,6 +27,9 @@
           <span id="header-nome-tecnico"></span>
           <div class="header-btns">
             <button id="btn-admin" class="btn-admin hidden">Admin</button>
+            <button id="btn-meu-historico" class="btn-meu-historico hidden">
+              <i data-lucide="clock" class="icon icon-sm"></i> Histórico
+            </button>
             <button id="btn-logout" class="btn-logout">Sair</button>
           </div>
         </div>
@@ -155,6 +158,26 @@
 
     <!-- ===== BARRA DE ROTA (fixa, visível só em modo rota) ===== -->
     <div id="barra-rota" class="barra-rota hidden"></div>
+
+    <!-- ===== TELA HISTÓRICO PESSOAL ===== -->
+    <div id="tela-historico-pessoal" class="tela-admin hidden">
+      <div class="admin-topbar">
+        <button id="btn-voltar-historico" class="btn-voltar-lista">
+          <i data-lucide="arrow-left" class="icon icon-sm"></i> Voltar
+        </button>
+        <span class="admin-titulo">Meu Histórico</span>
+      </div>
+      <div class="mh-filtros">
+        <select id="mh-filter-status" class="input-select">
+          <option value="">Todos</option>
+          <option value="Retirado">Retirado</option>
+          <option value="Parcial">Parcial</option>
+          <option value="Quebra">Quebra</option>
+        </select>
+        <input type="text" id="mh-search" class="input-search mh-search-input" placeholder="Buscar contrato ou endereço..." />
+      </div>
+      <div id="mh-conteudo" class="admin-conteudo"></div>
+    </div>
 
     <!-- ===== TELA ADMIN ===== -->
     <div id="tela-admin" class="tela-admin hidden">

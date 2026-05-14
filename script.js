@@ -1037,7 +1037,6 @@ let histSubView = "lista"; // "lista" | "dia"
 // INICIALIZAÇÃO
 // =========================================
 document.addEventListener("DOMContentLoaded", () => {
-  // Registra Service Worker (requer HTTPS ou localhost)
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () =>
       navigator.serviceWorker.register("./sw.js").catch(() => {}),
@@ -1049,6 +1048,14 @@ document.addEventListener("DOMContentLoaded", () => {
     iniciarApp();
   } else {
     mostrarTelaLogin();
+  }
+});
+
+// Quando a página é restaurada do bfcache (ex: ao voltar da câmera no Android)
+// sem precisar recarregar tudo — dados já estão em contratos[]
+window.addEventListener("pageshow", (e) => {
+  if (e.persisted && tecnicoLogado() && contratos.length > 0) {
+    renderIcons(); // Re-render ícones que podem ter sumido
   }
 });
 
@@ -1086,6 +1093,11 @@ function iniciarApp() {
     atualizarIndicadorOffline();
   });
 
+  // Mostra botão "Histórico" para técnicos não-admin
+  if (!tecnico.adm) {
+    document.getElementById("btn-meu-historico").classList.remove("hidden");
+  }
+
   configurarEventos();
   atualizarIndicadorOffline();
   iniciarHeartbeat();
@@ -1095,8 +1107,46 @@ function iniciarApp() {
 // =========================================
 // COMUNICAÇÃO COM A API
 // =========================================
+function _filtrarContratosPermitidos(lista) {
+  const { cidades, usuario, adm } = tecnicoLogado() || {};
+  const usuarioLow = usuario?.trim().toLowerCase() || "";
+  const ehAgendadoParaMim = (c) =>
+    c.obs1?.trim().toUpperCase() === "AGENDADO" &&
+    c.tecnicoDesig?.trim().toLowerCase() === usuarioLow;
+  let resultado = lista;
+  if (cidades) {
+    const permitidas = cidades.map((c) => c.toLowerCase());
+    resultado = resultado.filter(
+      (c) => permitidas.includes(c.cidade.toLowerCase()) || (!adm && ehAgendadoParaMim(c)),
+    );
+  }
+  if (!adm) {
+    resultado = resultado.filter(
+      (c) => c.obs1?.trim().toUpperCase() !== "CLIENTE SOLICITA RETIRADA EM OUTRO ENDEREÇO",
+    );
+  }
+  return resultado;
+}
+
 async function carregarContratos() {
+  const { usuario } = tecnicoLogado() || {};
+
+  // Mostra cache IDB imediatamente — evita tela em branco ao voltar da câmera
+  const cached = await lerContratosIDB(usuario);
+  if (cached?.length) {
+    contratos = cached;
+    preencherFiltros();
+    renderizarLista(contratos);
+    _refreshContratosSilencioso(usuario); // atualiza em background sem spinner
+    return;
+  }
+
+  // Sem cache: exibe loading e busca normalmente
   mostrarCarregando();
+  await _fetchContratos(usuario, false);
+}
+
+async function _fetchContratos(usuario, silencioso) {
   try {
     const resposta = await fetch(`${GAS_URL}?sheet=SAFRA`);
     if (!resposta.ok) throw new Error(`Erro HTTP ${resposta.status}`);
@@ -1104,54 +1154,31 @@ async function carregarContratos() {
     if (resJson.error) throw new Error(resJson.error);
     const dados = resJson.data ?? [];
     if (!Array.isArray(dados) || dados.length === 0) {
-      mostrarVazio("Nenhum contrato encontrado na planilha.");
+      if (!silencioso) mostrarVazio("Nenhum contrato encontrado na planilha.");
       return;
     }
-    contratos = dados.map(mapearContrato);
-
-    // Restringe cidades conforme permissão do técnico logado
-    // Exceto: contrato agendado para este técnico (TECNICO_DESIG) aparece sempre
-    const { cidades, usuario, adm } = tecnicoLogado() || {};
-    const usuarioLow = usuario?.trim().toLowerCase() || "";
-    const ehAgendadoParaMim = (c) =>
-      c.obs1?.trim().toUpperCase() === "AGENDADO" &&
-      c.tecnicoDesig?.trim().toLowerCase() === usuarioLow;
-    if (cidades) {
-      const permitidas = cidades.map((c) => c.toLowerCase());
-      contratos = contratos.filter(
-        (c) =>
-          permitidas.includes(c.cidade.toLowerCase()) ||
-          (!adm && ehAgendadoParaMim(c)),
-      );
-    }
-    // Oculta contratos de "outro endereço" para técnicos (não ADMs)
-    if (!adm) {
-      contratos = contratos.filter(
-        (c) =>
-          c.obs1?.trim().toUpperCase() !==
-          "CLIENTE SOLICITA RETIRADA EM OUTRO ENDEREÇO",
-      );
-    }
-
-    salvarContratosIDB(contratos, usuario); // cache em background, sem await
+    const novos = _filtrarContratosPermitidos(dados.map(mapearContrato));
+    contratos = novos;
+    salvarContratosIDB(contratos, usuario);
     preencherFiltros();
     renderizarLista(contratos);
   } catch (erro) {
+    if (silencioso) return; // falha silenciosa — o cache já está na tela
     console.error("Erro ao carregar contratos:", erro);
-    // Tenta cache offline (IndexedDB)
-    const { usuario } = tecnicoLogado() || {};
     const cached = await lerContratosIDB(usuario);
-    if (cached && cached.length > 0) {
+    if (cached?.length) {
       contratos = cached;
       atualizarIndicadorOffline();
       preencherFiltros();
       renderizarLista(contratos);
     } else {
-      mostrarErro(
-        "Sem conexão e sem cache disponível. Verifique sua internet.",
-      );
+      mostrarErro("Sem conexão e sem cache disponível. Verifique sua internet.");
     }
   }
+}
+
+function _refreshContratosSilencioso(usuario) {
+  _fetchContratos(usuario, true);
 }
 
 async function salvarNaPlanilha(contrato, campos) {
@@ -2234,6 +2261,37 @@ async function uploadTodasFotos(arquivos) {
   return urls.join("|");
 }
 
+// Comprime foto via Canvas antes de armazenar — reduz de ~5MB para ~300KB
+// Resolve "espaço insuficiente" em dispositivos com pouca memória
+async function comprimirFoto(file, maxLado = 1920, qualidade = 0.82) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width: w, height: h } = img;
+      if (w > maxLado || h > maxLado) {
+        if (w >= h) { h = Math.round(h * maxLado / w); w = maxLado; }
+        else { w = Math.round(w * maxLado / h); h = maxLado; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          const nome = file.name.replace(/\.\w+$/, ".jpg");
+          resolve(new File([blob], nome, { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        qualidade,
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 function criarInputFoto() {
   return `
     <label class="detalhe-label" style="margin:10px 0 6px;display:block">
@@ -2255,8 +2313,11 @@ function criarInputFoto() {
 function configurarPreviewFotos() {
   _fotoArquivos = [];
 
-  function adicionarFotos(files) {
-    _fotoArquivos.push(...Array.from(files));
+  async function adicionarFotos(files) {
+    const preview = document.getElementById("foto-preview");
+    if (preview) preview.innerHTML = `<span class="foto-comprimindo">Processando...</span>`;
+    const comprimidos = await Promise.all(Array.from(files).map(comprimirFoto));
+    _fotoArquivos.push(...comprimidos);
     renderizarPreviewFotos();
   }
 
@@ -2271,18 +2332,25 @@ function configurarPreviewFotos() {
 function renderizarPreviewFotos() {
   const preview = document.getElementById("foto-preview");
   if (!preview) return;
+  // Revoga URLs anteriores para não vazar memória
+  preview.querySelectorAll("img[data-obj-url]").forEach((img) => {
+    URL.revokeObjectURL(img.src);
+  });
   preview.innerHTML = "";
   _fotoArquivos.forEach((file, idx) => {
     const wrap = document.createElement("div");
     wrap.className = "foto-thumb-wrap";
     const img = document.createElement("img");
-    img.src = URL.createObjectURL(file);
+    const objUrl = URL.createObjectURL(file);
+    img.src = objUrl;
+    img.dataset.objUrl = "1";
     img.className = "foto-thumb-preview";
     const btn = document.createElement("button");
     btn.className = "foto-thumb-remove";
     btn.title = "Remover";
     btn.textContent = "×";
     btn.addEventListener("click", () => {
+      URL.revokeObjectURL(objUrl);
       _fotoArquivos.splice(idx, 1);
       renderizarPreviewFotos();
     });
@@ -2532,6 +2600,87 @@ function mostrarErro(msg) {
 function mostrarVazio(msg) {
   document.getElementById("lista-contratos").innerHTML =
     `<div class="estado-vazio"><div class="icone"><i data-lucide="clipboard-list" class="icon icon-estado"></i></div><p>${msg}</p></div>`;
+  renderIcons();
+}
+
+// =========================================
+// HISTÓRICO PESSOAL DO TÉCNICO
+// =========================================
+function abrirHistoricoPessoal() {
+  document.getElementById("app-principal").classList.add("hidden");
+  document.getElementById("tela-historico-pessoal").classList.remove("hidden");
+  renderizarHistoricoPessoal();
+}
+
+function fecharHistoricoPessoal() {
+  document.getElementById("tela-historico-pessoal").classList.add("hidden");
+  document.getElementById("app-principal").classList.remove("hidden");
+}
+
+function renderizarHistoricoPessoal() {
+  const conteudo = document.getElementById("mh-conteudo");
+  if (!conteudo) return;
+  const statusFiltro = document.getElementById("mh-filter-status")?.value || "";
+  const busca = (document.getElementById("mh-search")?.value || "").toLowerCase();
+  const { usuario } = tecnicoLogado() || {};
+  const usuarioLow = usuario?.trim().toLowerCase() || "";
+
+  const EXEC_STATUS = new Set(["Retirado", "Parcial", "Quebra"]);
+  let lista = contratos.filter((c) => {
+    if (!EXEC_STATUS.has(c.status)) return false;
+    if (c.tecnicoExec?.trim().toLowerCase() !== usuarioLow) return false;
+    if (statusFiltro && c.status !== statusFiltro) return false;
+    if (busca) {
+      const texto = `${c.contrato} ${c.nome} ${c.endereco} ${c.cidade}`.toLowerCase();
+      if (!texto.includes(busca)) return false;
+    }
+    return true;
+  });
+
+  lista = lista.sort((a, b) => parseDateBR(b.dataExec) - parseDateBR(a.dataExec));
+
+  if (!lista.length) {
+    conteudo.innerHTML = `<div class="estado-vazio"><p>Nenhuma execução encontrada.</p></div>`;
+    return;
+  }
+
+  const total = lista.length;
+  const totRet = lista.filter((c) => c.status === "Retirado").length;
+  const totPar = lista.filter((c) => c.status === "Parcial").length;
+  const totQbr = lista.filter((c) => c.status === "Quebra").length;
+
+  const itens = lista.map((c) => {
+    const stCls = statusParaClasse(c.status);
+    const connectBadge = c.noConnect
+      ? `<span class="mh-badge-connect">Connect ✓</span>` : "";
+    const seriais = c.seriaisRet
+      ? `<div class="mh-seriais"><i data-lucide="package" class="icon icon-xs"></i> ${escHtml(c.seriaisRet)}</div>` : "";
+    const obs = c.obsExec
+      ? `<div class="mh-obs">${escHtml(c.obsExec)}</div>` : "";
+    const fotos = c.fotoExec
+      ? `<span class="mh-badge-foto"><i data-lucide="camera" class="icon icon-xs"></i> ${c.fotoExec.split("|").filter(Boolean).length} foto(s)</span>` : "";
+    return `<div class="mh-item" onclick="abrirModalPorId('${escHtml(c.id)}')">
+      <div class="mh-item-header">
+        <span class="badge ${stCls}">${escHtml(c.status)}</span>
+        <span class="mh-data">${escHtml(c.dataExec || "—")}</span>
+      </div>
+      <div class="mh-nome">${escHtml(c.nome)}</div>
+      <div class="mh-end">${escHtml(c.endereco)}${c.cidade !== "—" ? `, ${escHtml(c.cidade)}` : ""}</div>
+      <div class="mh-item-footer">
+        ${fotos}${connectBadge}
+      </div>
+      ${seriais}${obs}
+    </div>`;
+  }).join("");
+
+  conteudo.innerHTML = `
+    <div class="mh-resumo">
+      <span class="hist-dia-chip chip-ret">Retirados: <strong>${totRet}</strong></span>
+      <span class="hist-dia-chip chip-par">Parciais: <strong>${totPar}</strong></span>
+      <span class="hist-dia-chip chip-qbr">Quebras: <strong>${totQbr}</strong></span>
+      <span class="hist-dia-chip chip-tot">Total: <strong>${total}</strong></span>
+    </div>
+    <div class="mh-lista">${itens}</div>`;
   renderIcons();
 }
 
@@ -3320,6 +3469,10 @@ function configurarEventos() {
     if (tr) abrirModalPorId(tr.dataset.id);
   });
   document.getElementById("btn-admin").addEventListener("click", abrirAdmin);
+  document.getElementById("btn-meu-historico")?.addEventListener("click", abrirHistoricoPessoal);
+  document.getElementById("btn-voltar-historico")?.addEventListener("click", fecharHistoricoPessoal);
+  document.getElementById("mh-filter-status")?.addEventListener("change", renderizarHistoricoPessoal);
+  document.getElementById("mh-search")?.addEventListener("input", renderizarHistoricoPessoal);
   document
     .getElementById("btn-voltar-lista")
     .addEventListener("click", voltarLista);

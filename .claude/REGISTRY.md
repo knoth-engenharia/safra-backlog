@@ -310,3 +310,11 @@ Engenharia/
 | 2026-05-14 | Admin aba "Técnicos": `carregarPresenca()`, `renderizarPresencaHTML()`, heartbeat 5 min |
 | 2026-05-14 | GAS: `COLUNAS_PERMITIDAS` virou objeto por aba; `STATUS` adicionado na whitelist SAFRA |
 | 2026-05-14 | GAS: `lerPresenca()` usa `Utilities.formatDate` (fix datas aparecendo como string JS) |
+| 2026-05-14 | `comprimirFoto()`: Canvas compression antes de armazenar (max 1920px, 82% JPEG) — fix "espaço insuficiente" |
+| 2026-05-14 | `renderizarPreviewFotos()`: revoga objectURLs ao re-renderizar — fix memory leak |
+| 2026-05-14 | `carregarContratos()`: IDB cache como fonte primária, fetch em background — fix reload na câmera |
+| 2026-05-14 | `_filtrarContratosPermitidos()`: extraído de `carregarContratos()` para reutilização |
+| 2026-05-14 | `pageshow` listener: skip reload quando página restaurada do bfcache |
+| 2026-05-14 | `tela-historico-pessoal`: nova tela para técnicos não-admin ver seus contratos executados |
+| 2026-05-14 | `abrirHistoricoPessoal()`, `fecharHistoricoPessoal()`, `renderizarHistoricoPessoal()` adicionados |
+| 2026-05-14 | `#btn-meu-historico` no header (visível apenas para não-admins) |
