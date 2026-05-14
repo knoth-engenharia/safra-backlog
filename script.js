@@ -23,6 +23,7 @@ const COL_LAT_EXEC   = "LAT_EXEC";
 const COL_LNG_EXEC   = "LNG_EXEC";
 
 const POR_PAGINA = 30;
+const APP_VERSION = "1.0";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -1166,6 +1167,14 @@ let sortRua = "az"; // "az" | "mais" | "menos"
 // Admin histórico sub-view
 let histSubView = "lista"; // "lista" | "dia"
 
+// Contador de operações em background — mostra/oculta #loading-bar
+let _loadingCount = 0;
+function _setCarregando(delta) {
+  _loadingCount = Math.max(0, _loadingCount + delta);
+  document.getElementById("loading-bar")
+    ?.classList.toggle("ativo", _loadingCount > 0);
+}
+
 // =========================================
 // INICIALIZAÇÃO
 // =========================================
@@ -1175,6 +1184,8 @@ document.addEventListener("DOMContentLoaded", () => {
       navigator.serviceWorker.register("./sw.js").catch(() => {}),
     );
   }
+  const elVer = document.getElementById("header-versao");
+  if (elVer) elVer.textContent = `v${APP_VERSION}`;
   renderIcons();
   const tecnico = tecnicoLogado();
   if (tecnico) {
@@ -1270,6 +1281,7 @@ async function carregarContratos() {
     contratos = cached;
     preencherFiltros();
     renderizarLista(contratos);
+    _tentarRestaurarModal();
     _refreshContratosSilencioso(usuario); // atualiza em background sem spinner
     return;
   }
@@ -1280,6 +1292,7 @@ async function carregarContratos() {
 }
 
 async function _fetchContratos(usuario, silencioso) {
+  _setCarregando(+1);
   try {
     const resposta = await fetch(`${GAS_URL}?sheet=SAFRA`);
     if (!resposta.ok) throw new Error(`Erro HTTP ${resposta.status}`);
@@ -1296,6 +1309,7 @@ async function _fetchContratos(usuario, silencioso) {
     preencherFiltros();
     renderizarLista(contratos);
     agendarNotificacoesHoje();
+    if (!silencioso) _tentarRestaurarModal();
   } catch (erro) {
     if (silencioso) return; // falha silenciosa — o cache já está na tela
     console.error("Erro ao carregar contratos:", erro);
@@ -1308,6 +1322,8 @@ async function _fetchContratos(usuario, silencioso) {
     } else {
       mostrarErro("Sem conexão e sem cache disponível. Verifique sua internet.");
     }
+  } finally {
+    _setCarregando(-1);
   }
 }
 
@@ -1320,20 +1336,25 @@ async function salvarNaPlanilha(contrato, campos) {
     await enfileirarBaixa(contrato.contrato, campos);
     throw new OfflineError("Sem conexão — baixa enfileirada");
   }
-  const fd = new FormData();
-  fd.append(
-    "payload",
-    JSON.stringify({
-      sheet: "SAFRA",
-      keyCol: "CONTRATO",
-      keyVal: contrato.contrato,
-      data: campos,
-    }),
-  );
-  const resp = await fetch(GAS_URL, { method: "POST", body: fd });
-  if (!resp.ok) throw new Error(`Erro HTTP ${resp.status}`);
-  const json = await resp.json();
-  if (json.error) throw new Error(json.error);
+  _setCarregando(+1);
+  try {
+    const fd = new FormData();
+    fd.append(
+      "payload",
+      JSON.stringify({
+        sheet: "SAFRA",
+        keyCol: "CONTRATO",
+        keyVal: contrato.contrato,
+        data: campos,
+      }),
+    );
+    const resp = await fetch(GAS_URL, { method: "POST", body: fd });
+    if (!resp.ok) throw new Error(`Erro HTTP ${resp.status}`);
+    const json = await resp.json();
+    if (json.error) throw new Error(json.error);
+  } finally {
+    _setCarregando(-1);
+  }
 }
 
 function formatarDataExec() {
@@ -2132,12 +2153,56 @@ function criarAcoesHTML() {
     <button class="btn btn-quebra"   onclick="mostrarSeletorQuebra()">Marcar como Quebra</button>`;
 }
 
+// --- Persistência de estado do modal (câmera Android mata a página) ---
+function _salvarEstadoModal(updates) {
+  try {
+    const raw = sessionStorage.getItem("safra_modal_state") || "{}";
+    sessionStorage.setItem("safra_modal_state",
+      JSON.stringify({ ...JSON.parse(raw), ...updates }));
+  } catch {}
+}
+
+function _limparEstadoModal() {
+  try { sessionStorage.removeItem("safra_modal_state"); } catch {}
+}
+
+function _tentarRestaurarModal() {
+  try {
+    const raw = sessionStorage.getItem("safra_modal_state");
+    if (!raw) return;
+    const state = JSON.parse(raw);
+    if (!state?.contratoId) return;
+    const c = contratos.find((x) => x.id === state.contratoId);
+    if (!c || c.status !== "Pendente") { _limparEstadoModal(); return; }
+    _limparEstadoModal(); // limpa antes de abrir para não restaurar em loop
+    abrirModal(c);
+    requestAnimationFrame(() => {
+      if (state.fluxo === "retirado") {
+        mostrarConfirmacaoRetirado();
+        requestAnimationFrame(() => {
+          const el = document.getElementById("obs-exec-input");
+          if (el && state.obs) el.value = state.obs;
+        });
+      } else if (state.fluxo === "quebra") {
+        mostrarSeletorQuebra();
+        requestAnimationFrame(() => {
+          const sel = document.getElementById("select-codigo-quebra");
+          if (sel && state.codigoQuebra) sel.value = state.codigoQuebra;
+          const el = document.getElementById("obs-exec-input");
+          if (el && state.obs) el.value = state.obs;
+        });
+      }
+    });
+  } catch { _limparEstadoModal(); }
+}
+
 // --- Fluxo Retirado ---
 function mostrarConfirmacaoRetirado() {
+  _salvarEstadoModal({ contratoId: contratoAtivo?.id, fluxo: "retirado", obs: "" });
   document.getElementById("acoes-modal").innerHTML = `
     ${criarSeletorSeriaisHTML(contratoAtivo?.terminais || "")}
     <label class="detalhe-label" style="margin-bottom:6px;display:block">Observação (opcional)</label>
-    <textarea id="obs-exec-input" class="obs-textarea" placeholder="Alguma observação sobre a retirada..."></textarea>
+    <textarea id="obs-exec-input" class="obs-textarea" placeholder="Alguma observação sobre a retirada..." oninput="_salvarEstadoModal({obs:this.value})"></textarea>
     ${criarInputFoto()}
     <button class="btn btn-retirado" onclick="confirmarRetirado()">Confirmar Retirado</button>
     <button class="btn btn-cancelar" onclick="restaurarAcoes()">Cancelar</button>`;
@@ -2174,16 +2239,17 @@ async function confirmarRetirado() {
 
 // --- Fluxo Quebra ---
 function mostrarSeletorQuebra() {
+  _salvarEstadoModal({ contratoId: contratoAtivo?.id, fluxo: "quebra", obs: "", codigoQuebra: "" });
   const opcoes = CODIGOS_QUEBRA.map(
     (c) => `<option value="${c}">${c}</option>`,
   ).join("");
   document.getElementById("acoes-modal").innerHTML = `
     <label class="detalhe-label" style="margin-bottom:6px;display:block">Código de retorno</label>
-    <select id="select-codigo-quebra" class="input-select" style="width:100%;margin-bottom:12px">
+    <select id="select-codigo-quebra" class="input-select" style="width:100%;margin-bottom:12px" onchange="_salvarEstadoModal({codigoQuebra:this.value})">
       <option value="">Selecione o motivo...</option>${opcoes}
     </select>
     <label class="detalhe-label" style="margin-bottom:6px;display:block">Observação (opcional)</label>
-    <textarea id="obs-exec-input" class="obs-textarea" placeholder="Alguma observação sobre a quebra..."></textarea>
+    <textarea id="obs-exec-input" class="obs-textarea" placeholder="Alguma observação sobre a quebra..." oninput="_salvarEstadoModal({obs:this.value})"></textarea>
     ${criarInputFoto()}
     <button class="btn btn-quebra"   onclick="confirmarQuebra()">Confirmar Quebra</button>
     <button class="btn btn-cancelar" onclick="restaurarAcoes()">Cancelar</button>`;
@@ -2206,109 +2272,99 @@ async function confirmarQuebra() {
 }
 
 function restaurarAcoes() {
+  _limparEstadoModal();
   document.getElementById("acoes-modal").innerHTML = criarAcoesHTML();
   renderIcons();
 }
 
 // --- Salvamento ---
 async function executarSalvamento(camposBase, novoStatus) {
-  const btns = document.querySelectorAll("#acoes-modal .btn");
-  btns.forEach((b) => (b.disabled = true));
-
   const obsExec =
     document.getElementById("obs-exec-input")?.value?.trim() || "";
   const dataExec = formatarDataExec();
   const tecnico = tecnicoLogado()?.nome || "";
-
-  // GPS e fotos em paralelo — nenhum bloqueia o outro
-  const geoPromise = capturarGeolocalizacao();
-
-  let fotoExec = "";
-  if (
-    IMGBB_API_KEY !== "SUA_CHAVE_IMGBB_AQUI" &&
-    _fotoArquivos.length &&
-    navigator.onLine
-  ) {
-    try {
-      mostrarStatusUpload("Enviando fotos...");
-      fotoExec = await uploadTodasFotos(_fotoArquivos);
-    } catch (e) {
-      console.warn("Falha no upload de fotos:", e);
-    }
-  }
-
-  const geo = await geoPromise;
-
-  // Registra visita automaticamente ao concluir qualquer ação
   const visitasAnt = contratoAtivo.visitas || "";
   const novasVisitas = visitasAnt ? `${visitasAnt}|${dataExec}` : dataExec;
+  const fotosParaUpload = [..._fotoArquivos]; // captura antes de fechar modal
+  const contratoParaSalvar = contratoAtivo;   // captura ref antes de fecharModal()
 
-  const campos = {
-    ...camposBase,
-    [COL_OBS_EXEC]: obsExec,
-    [COL_DATA_EXEC]: dataExec,
-    [COL_TECNICO]: tecnico,
-    [COL_FOTO]: fotoExec,
-    [COL_BAIXA_SITE]: "Sim",
-    [COL_VISITAS]: novasVisitas,
-    ...(geo ? { [COL_LAT_EXEC]: geo.lat, [COL_LNG_EXEC]: geo.lng } : {}),
-  };
+  // Atualização otimista — fecha modal e atualiza lista imediatamente
+  const idx = contratos.findIndex((c) => c.id === contratoAtivo.id);
+  const contratoOriginal = idx !== -1 ? { ...contratos[idx] } : null;
+  if (idx !== -1) {
+    contratos[idx] = {
+      ...contratos[idx],
+      status: novoStatus,
+      codigoOS: camposBase[COL_CODIGO_OS],
+      obsExec,
+      dataExec,
+      tecnicoExec: tecnico,
+      seriaisRet: camposBase[COL_SERIAIS_RET] || contratos[idx].seriaisRet,
+      baixaSite: "Sim",
+      visitas: novasVisitas,
+    };
+  }
+  fecharModal();   // também chama _limparEstadoModal()
+  aplicarFiltros();
 
+  // GPS + fotos + save em background — loading bar indica progresso
+  _setCarregando(+1);
   try {
-    await salvarNaPlanilha(contratoAtivo, campos);
+    const geoPromise = capturarGeolocalizacao();
 
-    const idx = contratos.findIndex((c) => c.id === contratoAtivo.id);
-    if (idx !== -1) {
-      contratos[idx] = {
-        ...contratos[idx],
-        status: novoStatus,
-        codigoOS: camposBase[COL_CODIGO_OS],
-        obsExec,
-        dataExec,
-        tecnicoExec: tecnico,
-        fotoExec,
-        seriaisRet: camposBase[COL_SERIAIS_RET] || contratos[idx].seriaisRet,
-        baixaSite: "Sim",
-        visitas: novasVisitas,
-        ...(geo ? { latExec: geo.lat, lngExec: geo.lng } : {}),
-      };
+    let fotoExec = "";
+    if (IMGBB_API_KEY !== "SUA_CHAVE_IMGBB_AQUI" && fotosParaUpload.length && navigator.onLine) {
+      try {
+        fotoExec = await uploadTodasFotos(fotosParaUpload);
+      } catch (e) {
+        console.warn("Falha no upload de fotos:", e);
+      }
     }
 
-    fecharModal();
+    const geo = await geoPromise;
+
+    const campos = {
+      ...camposBase,
+      [COL_OBS_EXEC]: obsExec,
+      [COL_DATA_EXEC]: dataExec,
+      [COL_TECNICO]: tecnico,
+      [COL_FOTO]: fotoExec,
+      [COL_BAIXA_SITE]: "Sim",
+      [COL_VISITAS]: novasVisitas,
+      ...(geo ? { [COL_LAT_EXEC]: geo.lat, [COL_LNG_EXEC]: geo.lng } : {}),
+    };
+
+    await salvarNaPlanilha(contratoParaSalvar, campos);
+
+    // Atualiza com valores reais (foto URL e GPS) após confirmação do servidor
+    if (idx !== -1) {
+      if (fotoExec) contratos[idx].fotoExec = fotoExec;
+      if (geo) { contratos[idx].latExec = geo.lat; contratos[idx].lngExec = geo.lng; }
+    }
+    salvarContratosIDB(contratos, tecnicoLogado()?.usuario);
+    agendarNotificacoesHoje();
     mostrarToast("Baixa registrada com sucesso.", "sucesso");
-    aplicarFiltros();
+
   } catch (erro) {
     if (erro instanceof OfflineError) {
-      const idx = contratos.findIndex((c) => c.id === contratoAtivo.id);
-      if (idx !== -1) {
-        contratos[idx] = {
-          ...contratos[idx],
-          status: novoStatus,
-          codigoOS: camposBase[COL_CODIGO_OS],
-          obsExec: campos[COL_OBS_EXEC],
-          dataExec: campos[COL_DATA_EXEC],
-          tecnicoExec: tecnico,
-          seriaisRet: camposBase[COL_SERIAIS_RET] || contratos[idx].seriaisRet,
-          baixaSite: "Sim",
-          visitas: novasVisitas,
-          _pendente: true,
-        };
-      }
-      fecharModal();
+      if (idx !== -1) contratos[idx]._pendente = true;
       mostrarToast(
         "Sem conexão. Baixa salva localmente e será enviada ao reconectar.",
         "aviso",
       );
       atualizarIndicadorOffline();
-      aplicarFiltros();
     } else {
       console.error("Erro ao salvar:", erro);
+      // Rollback: reverte contrato ao estado original
+      if (idx !== -1 && contratoOriginal) contratos[idx] = contratoOriginal;
+      aplicarFiltros();
       mostrarToast(
         "Erro ao salvar. Verifique sua conexão e tente novamente.",
         "erro",
       );
-      btns.forEach((b) => (b.disabled = false));
     }
+  } finally {
+    _setCarregando(-1);
   }
 }
 
@@ -2319,6 +2375,7 @@ function mostrarStatusUpload(msg) {
 }
 
 function fecharModal() {
+  _limparEstadoModal();
   document.getElementById("modal").classList.add("hidden");
   contratoAtivo = null;
 }

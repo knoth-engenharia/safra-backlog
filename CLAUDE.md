@@ -78,4 +78,26 @@ Ver plano completo em: `docs/PLANO_DESENVOLVIMENTO.md`
 
 ---
 
+---
+
+## Versionamento — `APP_VERSION` em `script.js`
+
+A versão atual fica em `script.js` na constante `APP_VERSION` (linha ~26) e é exibida automaticamente no header (`v1.0`).
+
+**Regra de incremento `xx.yy`:**
+
+| Tipo de mudança | O que incrementar | Exemplos |
+|---|---|---|
+| Nova funcionalidade visível ao usuário | `xx` (+1), zera `yy` | nova aba admin, novo fluxo de ação, nova tela |
+| Melhoria, ajuste, bug fix, novo filtro | `yy` (+1) | filtro adicionado, coluna nova, fix de câmera |
+
+**Como atualizar:**
+1. Identifique o nível da mudança pela tabela acima
+2. Edite `const APP_VERSION = "x.y"` em `script.js` (linha ~26)
+3. Registre no CHANGELOG DO REGISTRO do `.claude/REGISTRY.md`
+
+**Versão atual**: `1.0`
+
+---
+
 **Last Updated**: 2026-05-14

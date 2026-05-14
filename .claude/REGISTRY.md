@@ -22,6 +22,7 @@
 | `GAS_URL` | `AKfycby...` (linha 7) | URL do Web App GAS — muda a cada novo deploy |
 | `IMGBB_API_KEY` | `a6d2e345...` (linha 11) | Chave ImgBB para upload de fotos |
 | `POR_PAGINA` | `30` | Contratos por página |
+| `APP_VERSION` | `"1.0"` (linha ~26) | Versão exibida no header — incrementar conforme regras em CLAUDE.md |
 
 **⚠️ Ao alterar `gas/Codigo.gs`, um novo deploy é obrigatório e a `GAS_URL` muda.**
 
@@ -330,3 +331,10 @@ Engenharia/
 | 2026-05-14 | `renderizarHistoricoPosDiaHTML`: filtros Mostrar + Origem adicionados (mesmos da sub-view Lista) |
 | 2026-05-14 | CSS: `.hist-filtros-linha .hist-filtro-status` → `flex:1` para ocupar largura total |
 | 2026-05-14 | CSS: `@media (min-width:900px)` — layout desktop: `.container`/`.tela-admin` → 1100px, `.lista-contratos` → 2 colunas, modal → 860px |
+| 2026-05-14 | Barra de carregamento global: `#loading-bar` (HTML+CSS), `_loadingCount`, `_setCarregando(delta)` — instrumentado em `_fetchContratos` e `salvarNaPlanilha` |
+| 2026-05-14 | `_salvarEstadoModal`, `_limparEstadoModal`, `_tentarRestaurarModal` — sessionStorage para restaurar modal ao voltar da câmera Android |
+| 2026-05-14 | `executarSalvamento` reescrito: UI otimista (fecha modal + aplica filtros imediatamente), GPS+foto+save em background com loading bar e rollback em erro |
+| 2026-05-14 | `mostrarConfirmacaoRetirado`, `mostrarSeletorQuebra`: oninput/onchange salvam obs/codigoQuebra no sessionStorage |
+| 2026-05-14 | `fecharModal`, `restaurarAcoes`: chamam `_limparEstadoModal()` |
+| 2026-05-14 | `carregarContratos`, `_fetchContratos`: chamam `_tentarRestaurarModal()` após render |
+| 2026-05-14 | `APP_VERSION = "1.0"` adicionado em script.js; exibido no header como badge `vX.Y`; regras de versionamento documentadas em CLAUDE.md |

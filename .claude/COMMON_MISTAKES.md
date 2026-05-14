@@ -90,6 +90,20 @@ const patchUrl = `https://sheetdb.io/api/v1/${SHEETDB_ID}/CONTRATO/${id}?sheet=S
 
 ---
 
+### 8. Câmera Android mata a página — modal perdido
+
+**Sintoma**: Técnico clica no botão de câmera, tira a foto, ao voltar o app abre na tela inicial sem o contrato aberto  
+**Causa**: Chrome Android pode descartar a página da memória quando a câmera do sistema toma foco. O `pageshow` com `e.persisted=true` às vezes não dispara nesse cenário.  
+**Fix**: `_salvarEstadoModal()` grava `contratoId + fluxo + obs + codigoQuebra` no `sessionStorage` a cada interação. `_tentarRestaurarModal()` é chamado após o primeiro render (cache IDB ou fetch) e reabre o modal automaticamente.  
+**Importante**: `_limparEstadoModal()` deve ser chamado em `fecharModal()` e `restaurarAcoes()` para não restaurar indevidamente.
+
+### 9. `executarSalvamento` — não reutilizar referência `contratoAtivo` após `fecharModal()`
+
+**Causa**: `fecharModal()` zera `contratoAtivo = null`. O código que usa UI otimista chama `fecharModal()` cedo.  
+**Fix**: Capturar `const contratoParaSalvar = contratoAtivo` e `const fotosParaUpload = [..._fotoArquivos]` ANTES de chamar `fecharModal()`. Usar apenas essas cópias nas operações async posteriores.
+
+---
+
 **Atualizar este arquivo quando:**
 - Bug demorou mais de 30 min para debugar
 - Erro pode se repetir em outra sessão
