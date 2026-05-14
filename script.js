@@ -4,7 +4,7 @@
 // URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
 // Ver instruções em gas/Codigo.gs
 const GAS_URL =
-  "https://script.google.com/macros/s/AKfycbyFRh6mPanPQOWAXx0feolH9ToI6b_AFdhFmksvZb06OojihXKw8NUaXonnmAB9gEMK/exec";
+  "https://script.google.com/macros/s/AKfycbzKtjibJi2sTEQ-_YY1UEa2tzZX6Un_UltqCnkEQlomwxZcGn-UJsPrqKqBgKLetXL-/exec";
 
 // Cloudinary — upload de fotos (plano gratuito: 25GB storage)
 // Como configurar: ver instruções abaixo de CLOUDINARY_UPLOAD_PRESET
@@ -24,7 +24,7 @@ const COL_LAT_EXEC = "LAT_EXEC";
 const COL_LNG_EXEC = "LNG_EXEC";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "1.1";
+const APP_VERSION = "1.2";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -831,7 +831,7 @@ async function capturarGeolocalizacao() {
       resolve(null);
       return;
     }
-    const timer = setTimeout(() => resolve(null), 6000);
+    const timer = setTimeout(() => resolve(null), 3000);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         clearTimeout(timer);
@@ -844,7 +844,7 @@ async function capturarGeolocalizacao() {
         clearTimeout(timer);
         resolve(null);
       },
-      { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 },
+      { enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 },
     );
   });
 }
