@@ -637,6 +637,7 @@ function salvarSessao(tecnico) {
 
 function encerrarSessao() {
   pararHeartbeat();
+  cancelarNotificacoes();
   localStorage.removeItem(SESSAO_KEY);
   location.reload();
 }
@@ -682,6 +683,126 @@ function _aoVoltar() {
 function pararHeartbeat() {
   clearInterval(_heartbeatTimer);
   document.removeEventListener("visibilitychange", _aoVoltar);
+}
+
+// =========================================
+// NOTIFICAÇÕES DE AGENDAMENTO
+// =========================================
+let _timersNotificacao = [];
+
+function cancelarNotificacoes() {
+  _timersNotificacao.forEach(clearTimeout);
+  _timersNotificacao = [];
+}
+
+async function pedirPermissaoNotificacao() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  return (await Notification.requestPermission()) === "granted";
+}
+
+
+function _dispararNotificacao(titulo, corpo, tag) {
+  if (Notification.permission !== "granted") return;
+  navigator.serviceWorker.ready
+    .then((reg) =>
+      reg.showNotification(titulo, {
+        body: corpo,
+        icon: "./icon.svg",
+        badge: "./icon.svg",
+        tag: `agend-${tag}`,
+        requireInteraction: true,
+        data: { contratoId: tag },
+      }),
+    )
+    .catch(() => new Notification(titulo, { body: corpo, tag: `agend-${tag}` }));
+}
+
+// Checkpoints fixos do dia (horas)
+const NOTIF_CHECKPOINTS = [8, 10, 12, 15, 17];
+
+function _contarAgendadosPendentesHoje(usuario) {
+  const usuarioLow = usuario.trim().toLowerCase();
+  const hoje = new Date();
+  const hojeStr = [
+    String(hoje.getDate()).padStart(2, "0"),
+    String(hoje.getMonth() + 1).padStart(2, "0"),
+    hoje.getFullYear(),
+  ].join("/");
+  return contratos.filter(
+    (c) =>
+      c.obs1?.trim().toUpperCase() === "AGENDADO" &&
+      c.tecnicoDesig?.trim().toLowerCase() === usuarioLow &&
+      c.dataAgend?.startsWith(hojeStr) &&
+      c.status !== "Retirado" &&
+      c.status !== "Parcial",
+  ).length;
+}
+
+async function agendarNotificacoesHoje() {
+  const permitido = await pedirPermissaoNotificacao();
+  cancelarNotificacoes();
+
+  const { usuario } = tecnicoLogado() || {};
+  if (!usuario) return;
+
+  // Persiste agendamentos no IDB para o SW (periodic sync)
+  const usuarioLow = usuario.trim().toLowerCase();
+  const hoje = new Date();
+  const hojeStr = [
+    String(hoje.getDate()).padStart(2, "0"),
+    String(hoje.getMonth() + 1).padStart(2, "0"),
+    hoje.getFullYear(),
+  ].join("/");
+  const agendadosHoje = contratos.filter(
+    (c) =>
+      c.obs1?.trim().toUpperCase() === "AGENDADO" &&
+      c.tecnicoDesig?.trim().toLowerCase() === usuarioLow &&
+      c.dataAgend?.startsWith(hojeStr),
+  );
+  salvarAgendamentosNotifIDB(
+    agendadosHoje.map((c) => ({ id: c.id, dataAgend: c.dataAgend || "", status: c.status })),
+  );
+
+  _registrarPeriodicSync();
+
+  if (!permitido || !agendadosHoje.length) return;
+
+  // Agenda um lembrete em cada checkpoint futuro do dia
+  NOTIF_CHECKPOINTS.forEach((hora) => {
+    const dt = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), hora, 0, 0);
+    const ms = dt.getTime() - Date.now();
+    if (ms <= 0) return; // checkpoint já passou hoje
+    _timersNotificacao.push(
+      setTimeout(() => {
+        const pendentes = _contarAgendadosPendentesHoje(usuario);
+        if (!pendentes) return;
+        _dispararNotificacao(
+          `📅 ${pendentes} agendamento${pendentes > 1 ? "s" : ""} pendente${pendentes > 1 ? "s" : ""} hoje`,
+          "Abra o app para ver seus agendamentos.",
+          `checkpoint-${hora}h`,
+        );
+      }, ms),
+    );
+  });
+}
+
+function _registrarPeriodicSync() {
+  if (!("serviceWorker" in navigator) || !("periodicSync" in ServiceWorkerRegistration.prototype))
+    return;
+  navigator.serviceWorker.ready.then((reg) => {
+    navigator.permissions
+      .query({ name: "periodic-background-sync" })
+      .then((status) => {
+        if (status.state === "granted") {
+          reg.periodicSync
+            .register("check-agendamentos", { minInterval: 8 * 60 * 60 * 1000 }) // 8h
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  });
 }
 
 // =========================================
@@ -849,7 +970,7 @@ function mapearContrato(linha, indice) {
 class OfflineError extends Error {}
 
 const IDB_NAME = "backlog_safra_db";
-const IDB_VERSION = 1;
+const IDB_VERSION = 2;
 
 function abrirIDB() {
   return new Promise((resolve, reject) => {
@@ -862,10 +983,22 @@ function abrirIDB() {
       if (!db.objectStoreNames.contains("pending_baixas")) {
         db.createObjectStore("pending_baixas", { autoIncrement: true });
       }
+      // v2: agendamentos do dia para o SW disparar notificações
+      if (!db.objectStoreNames.contains("notif_agendamentos")) {
+        db.createObjectStore("notif_agendamentos", { keyPath: "chave" });
+      }
     };
     req.onsuccess = (e) => resolve(e.target.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+async function salvarAgendamentosNotifIDB(lista) {
+  try {
+    const db = await abrirIDB();
+    const tx = db.transaction("notif_agendamentos", "readwrite");
+    tx.objectStore("notif_agendamentos").put({ chave: "pendentes", lista, ts: Date.now() });
+  } catch {}
 }
 
 async function salvarContratosIDB(lista, usuario) {
@@ -1162,6 +1295,7 @@ async function _fetchContratos(usuario, silencioso) {
     salvarContratosIDB(contratos, usuario);
     preencherFiltros();
     renderizarLista(contratos);
+    agendarNotificacoesHoje();
   } catch (erro) {
     if (silencioso) return; // falha silenciosa — o cache já está na tela
     console.error("Erro ao carregar contratos:", erro);

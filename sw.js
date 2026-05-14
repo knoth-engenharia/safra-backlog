@@ -1,8 +1,8 @@
 // =============================================
-// SERVICE WORKER — Backlog Safra v1
+// SERVICE WORKER — Backlog Safra v3
 // Incrementar CACHE_NAME para forçar atualização
 // =============================================
-const CACHE_NAME = "backlog-safra-v2";
+const CACHE_NAME = "backlog-safra-v3";
 
 const STATIC_ASSETS = [
   "./",
@@ -38,6 +38,68 @@ self.addEventListener("activate", (e) => {
         ),
       )
       .then(() => self.clients.claim()),
+  );
+});
+
+// ---- Periodic Background Sync (Opção B) — lembrete diário de agendamentos ----
+self.addEventListener("periodicsync", (e) => {
+  if (e.tag === "check-agendamentos") {
+    e.waitUntil(_notificarAgendamentosBackground());
+  }
+});
+
+async function _lerAgendamentosIDB() {
+  return new Promise((resolve) => {
+    const req = indexedDB.open("backlog_safra_db");
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains("notif_agendamentos")) { resolve([]); return; }
+      const r = db.transaction("notif_agendamentos").objectStore("notif_agendamentos").get("pendentes");
+      r.onsuccess = () => resolve(r.result?.lista ?? []);
+      r.onerror = () => resolve([]);
+    };
+    req.onerror = () => resolve([]);
+  });
+}
+
+async function _notificarAgendamentosBackground() {
+  const lista = await _lerAgendamentosIDB();
+  if (!lista.length) return;
+
+  const hoje = new Date();
+  const hojeStr = [
+    String(hoje.getDate()).padStart(2, "0"),
+    String(hoje.getMonth() + 1).padStart(2, "0"),
+    hoje.getFullYear(),
+  ].join("/");
+
+  const pendentes = lista.filter(
+    (c) => c.dataAgend?.startsWith(hojeStr) && c.status !== "Retirado" && c.status !== "Parcial",
+  ).length;
+  if (!pendentes) return;
+
+  await self.registration.showNotification(
+    `📅 ${pendentes} agendamento${pendentes > 1 ? "s" : ""} pendente${pendentes > 1 ? "s" : ""} hoje`,
+    {
+      body: "Abra o app para ver seus agendamentos.",
+      icon: "./icon.svg",
+      badge: "./icon.svg",
+      tag: "agend-resumo-dia",
+      data: { tipo: "agendamentos" },
+    },
+  );
+}
+
+// ---- Clique na notificação — abre o app ----
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = self.registration.scope;
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const existente = clients.find((c) => c.url.startsWith(url));
+      if (existente) return existente.focus();
+      return self.clients.openWindow(url);
+    }),
   );
 });
 

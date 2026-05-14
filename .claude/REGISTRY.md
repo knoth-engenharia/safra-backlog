@@ -318,3 +318,6 @@ Engenharia/
 | 2026-05-14 | `tela-historico-pessoal`: nova tela para técnicos não-admin ver seus contratos executados |
 | 2026-05-14 | `abrirHistoricoPessoal()`, `fecharHistoricoPessoal()`, `renderizarHistoricoPessoal()` adicionados |
 | 2026-05-14 | `#btn-meu-historico` no header (visível apenas para não-admins) |
+| 2026-05-14 | IDB_VERSION 1→2: nova store `notif_agendamentos` para bridge com SW |
+| 2026-05-14 | Notificações: `pedirPermissaoNotificacao()`, `agendarNotificacoesHoje()`, `_dispararNotificacao()`, `cancelarNotificacoes()` — 15min/1h/hora exata |
+| 2026-05-14 | `sw.js` v3: `periodicsync` handler + `notificationclick` handler — resumo diário quando app fechado (Chrome Android PWA) |
