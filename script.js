@@ -19,6 +19,8 @@ const COL_BAIXA_SITE = "BAIXA_SITE";
 const COL_SERIAIS_RET = "SERIAIS_RETIRADOS";
 const COL_VISITAS = "VISITAS";
 const COL_NO_CONNECT = "NO_CONNECT";
+const COL_LAT_EXEC   = "LAT_EXEC";
+const COL_LNG_EXEC   = "LNG_EXEC";
 
 const POR_PAGINA = 30;
 
@@ -682,6 +684,27 @@ function pararHeartbeat() {
   document.removeEventListener("visibilitychange", _aoVoltar);
 }
 
+// =========================================
+// GEOLOCALIZAÇÃO DE EXECUÇÃO
+// =========================================
+async function capturarGeolocalizacao() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve(null); return; }
+    const timer = setTimeout(() => resolve(null), 6000);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        clearTimeout(timer);
+        resolve({
+          lat: pos.coords.latitude.toFixed(6),
+          lng: pos.coords.longitude.toFixed(6),
+        });
+      },
+      () => { clearTimeout(timer); resolve(null); },
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 },
+    );
+  });
+}
+
 // ---- Tempo relativo legível ----
 function tempoRelativo(str) {
   if (!str?.trim()) return "Nunca";
@@ -806,6 +829,8 @@ function mapearContrato(linha, indice) {
     fotoExec: linha[COL_FOTO] || "",
     seriaisRet: linha[COL_SERIAIS_RET] || "",
     visitas: linha[COL_VISITAS] || "",
+    latExec: linha[COL_LAT_EXEC] || "",
+    lngExec: linha[COL_LNG_EXEC] || "",
     dataAgend: formatarData(linha["DATA"] || ""),
     horario: linha["HORARIO"] || "",
     tecnicoDesig: linha["TECNICO_DESIG"] || "",
@@ -1004,6 +1029,9 @@ let rotaSelecionados = new Set(); // Set de contrato.id
 // Agrupamento
 let modoAgrupamento = ""; // "" | "rua"
 let sortRua = "az"; // "az" | "mais" | "menos"
+
+// Admin histórico sub-view
+let histSubView = "lista"; // "lista" | "dia"
 
 // =========================================
 // INICIALIZAÇÃO
@@ -1750,6 +1778,9 @@ function abrirModal(contrato) {
     contrato.dataExec ||
     contrato.tecnicoExec ||
     contrato.obsExec;
+  const geoExecUrl = contrato.latExec && contrato.lngExec
+    ? `https://www.google.com/maps?q=${contrato.latExec},${contrato.lngExec}`
+    : null;
   const agendStr = [
     contrato.dataAgend,
     contrato.horario ? `às ${contrato.horario}` : "",
@@ -1818,6 +1849,7 @@ function abrirModal(contrato) {
       ${f("Obs. Execução", contrato.obsExec)}
       ${criarFotosModal(contrato.fotoExec)}
       ${criarVisitasHTML(contrato.visitas)}
+      ${geoExecUrl ? `<a href="${geoExecUrl}" class="btn-mapa-modal btn-mapa-exec" target="_blank"><i data-lucide="navigation" class="icon icon-sm"></i> Ver localização da execução</a>` : ""}
     `,
           )
         : ""
@@ -2027,7 +2059,9 @@ async function executarSalvamento(camposBase, novoStatus) {
   const dataExec = formatarDataExec();
   const tecnico = tecnicoLogado()?.nome || "";
 
-  // Upload de fotos (pode ser vazio se não houver chave ou arquivos)
+  // GPS e fotos em paralelo — nenhum bloqueia o outro
+  const geoPromise = capturarGeolocalizacao();
+
   let fotoExec = "";
   if (
     IMGBB_API_KEY !== "SUA_CHAVE_IMGBB_AQUI" &&
@@ -2042,6 +2076,8 @@ async function executarSalvamento(camposBase, novoStatus) {
     }
   }
 
+  const geo = await geoPromise;
+
   // Registra visita automaticamente ao concluir qualquer ação
   const visitasAnt = contratoAtivo.visitas || "";
   const novasVisitas = visitasAnt ? `${visitasAnt}|${dataExec}` : dataExec;
@@ -2054,6 +2090,7 @@ async function executarSalvamento(camposBase, novoStatus) {
     [COL_FOTO]: fotoExec,
     [COL_BAIXA_SITE]: "Sim",
     [COL_VISITAS]: novasVisitas,
+    ...(geo ? { [COL_LAT_EXEC]: geo.lat, [COL_LNG_EXEC]: geo.lng } : {}),
   };
 
   try {
@@ -2072,6 +2109,7 @@ async function executarSalvamento(camposBase, novoStatus) {
         seriaisRet: camposBase[COL_SERIAIS_RET] || contratos[idx].seriaisRet,
         baixaSite: "Sim",
         visitas: novasVisitas,
+        ...(geo ? { latExec: geo.lat, lngExec: geo.lng } : {}),
       };
     }
 
@@ -2745,20 +2783,39 @@ function renderizarMetricasHTML(lista) {
     }`;
 }
 
+function criarToggleHistSubView() {
+  return `<div class="hist-subview-toggle">
+    <button class="btn-subview ${histSubView === "lista" ? "btn-subview-ativo" : ""}" onclick="mudarHistSubView('lista')">
+      <i data-lucide="list" class="icon icon-xs"></i> Lista
+    </button>
+    <button class="btn-subview ${histSubView === "dia" ? "btn-subview-ativo" : ""}" onclick="mudarHistSubView('dia')">
+      <i data-lucide="calendar-days" class="icon icon-xs"></i> Por dia
+    </button>
+  </div>`;
+}
+
+function mudarHistSubView(v) {
+  histSubView = v;
+  renderizarAdmin();
+}
+
 function renderizarHistoricoHTML(lista) {
+  if (histSubView === "dia") return renderizarHistoricoPosDiaHTML(lista);
+
   const filtroStatus =
     document.getElementById("adm-filter-hist-status")?.value || "Retirado";
 
   const baixas = lista
     .filter((c) => {
       if (filtroStatus === "Todos")
-        return c.status === "Retirado" || c.status === "Quebra";
+        return c.status === "Retirado" || c.status === "Quebra" || c.status === "Parcial";
       return c.status === filtroStatus;
     })
     .sort((a, b) => parseDateBR(b.dataExec) - parseDateBR(a.dataExec));
 
   if (!baixas.length) {
     return `<div class="admin-secao">
+      ${criarToggleHistSubView()}
       ${criarFiltroHistStatus(filtroStatus)}
       <div class="estado-vazio"><p>Nenhuma baixa encontrada.</p></div>
     </div>`;
@@ -2784,11 +2841,90 @@ function renderizarHistoricoHTML(lista) {
 
   return `
     <div class="admin-secao">
+      ${criarToggleHistSubView()}
       ${criarFiltroHistStatus(filtroStatus)}
       <p class="historico-count">${baixas.length} registro(s)</p>
       <div class="tabela-scroll">
         <table class="admin-table">
           <thead><tr><th>Contrato</th><th>Nome</th><th>Cidade</th><th>Status</th><th>Técnico</th><th>Data</th><th>Connect</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderizarHistoricoPosDiaHTML(lista) {
+  const umMesAtras = new Date();
+  umMesAtras.setMonth(umMesAtras.getMonth() - 1);
+  umMesAtras.setHours(0, 0, 0, 0);
+
+  const comExec = lista.filter((c) => {
+    if (!c.dataExec) return false;
+    if (c.status !== "Retirado" && c.status !== "Parcial" && c.status !== "Quebra") return false;
+    const dt = parseDateBR(c.dataExec);
+    return dt && dt >= umMesAtras;
+  });
+
+  if (!comExec.length) {
+    return `<div class="admin-secao">
+      ${criarToggleHistSubView()}
+      <div class="estado-vazio"><p>Nenhuma execução encontrada.</p></div>
+    </div>`;
+  }
+
+  // Agrupa por data (DD/MM/YYYY) — extrai apenas a parte da data via regex
+  const porDia = {};
+  comExec.forEach((c) => {
+    const m = c.dataExec.match(/(\d{2}\/\d{2}\/\d{4})/);
+    const dia = m ? m[1] : c.dataExec;
+    if (!porDia[dia]) porDia[dia] = { retirado: 0, parcial: 0, quebra: 0 };
+    if (c.status === "Retirado") porDia[dia].retirado++;
+    else if (c.status === "Parcial") porDia[dia].parcial++;
+    else if (c.status === "Quebra") porDia[dia].quebra++;
+  });
+
+  const dias = Object.entries(porDia).sort(([a], [b]) => parseDateBR(b) - parseDateBR(a));
+
+  const totRet  = dias.reduce((s, [, d]) => s + d.retirado, 0);
+  const totPar  = dias.reduce((s, [, d]) => s + d.parcial, 0);
+  const totQbr  = dias.reduce((s, [, d]) => s + d.quebra, 0);
+  const totGeral = totRet + totPar + totQbr;
+
+  const linhas = dias.map(([dia, d]) => {
+    const total = d.retirado + d.parcial + d.quebra;
+    const taxaPct = Math.round(((d.retirado + d.parcial) / total) * 100);
+    const taxaCls = taxaPct >= 70 ? "num-retirado" : taxaPct >= 50 ? "num-pendente" : "num-quebra";
+    return `<tr>
+      <td class="col-data-hist">${escHtml(dia)}</td>
+      <td class="num-retirado">${d.retirado}</td>
+      <td style="color:#8b5cf6;font-weight:700">${d.parcial || "—"}</td>
+      <td class="num-quebra">${d.quebra || "—"}</td>
+      <td><strong>${total}</strong></td>
+      <td class="${taxaCls}">${taxaPct}%</td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <div class="admin-secao">
+      ${criarToggleHistSubView()}
+      <div class="hist-dia-resumo">
+        <span class="hist-dia-chip chip-ret">Retirados: <strong>${totRet}</strong></span>
+        <span class="hist-dia-chip chip-par">Parciais: <strong>${totPar}</strong></span>
+        <span class="hist-dia-chip chip-qbr">Quebras: <strong>${totQbr}</strong></span>
+        <span class="hist-dia-chip chip-tot">Total: <strong>${totGeral}</strong></span>
+      </div>
+      <div class="tabela-scroll">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th class="num-retirado">Retirados</th>
+              <th style="color:#8b5cf6">Parciais</th>
+              <th class="num-quebra">Quebras</th>
+              <th>Total</th>
+              <th>Taxa</th>
+            </tr>
+          </thead>
           <tbody>${linhas}</tbody>
         </table>
       </div>

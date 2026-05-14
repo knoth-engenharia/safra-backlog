@@ -2354,3 +2354,92 @@ body {
   align-items: center;
 }
 .presenca-carregando { margin-top: 40px; }
+
+/* ---- Toggle Lista / Por Dia no histórico ---- */
+.hist-subview-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.btn-subview {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: #f3f4f6;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 8px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-subview:hover { background: #e5e7eb; }
+.btn-subview-ativo {
+  background: #0056b3;
+  border-color: #0056b3;
+  color: #fff;
+}
+.btn-subview-ativo:hover { background: #004494; }
+
+/* ---- Chips de resumo por dia ---- */
+.hist-dia-resumo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.hist-dia-chip {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.chip-ret { background: #d1fae5; color: #065f46; }
+.chip-par { background: #fef3c7; color: #92400e; }
+.chip-qbr { background: #fee2e2; color: #991b1b; }
+.chip-tot { background: #e0e7ff; color: #1e40af; }
+
+/* ---- Tabela "Por Dia" ---- */
+.hist-por-dia-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.hist-por-dia-table th {
+  background: #f3f4f6;
+  color: #374151;
+  font-weight: 700;
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 2px solid #e5e7eb;
+  white-space: nowrap;
+}
+.hist-por-dia-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+.hist-por-dia-table tr:last-child td { border-bottom: none; }
+.hist-por-dia-table tr:hover td { background: #f9fafb; }
+.col-data-hist {
+  font-weight: 600;
+  color: #374151;
+  white-space: nowrap;
+}
+.col-data-hist small {
+  display: block;
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: #9ca3af;
+}
+.hist-taxa-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.taxa-boa  { background: #d1fae5; color: #065f46; }
+.taxa-ok   { background: #fef3c7; color: #92400e; }
+.taxa-ruim { background: #fee2e2; color: #991b1b; }
