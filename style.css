@@ -628,6 +628,37 @@ body {
   font-size: 0.9rem;
 }
 
+/* ---- Filtros do histórico em linha ---- */
+.hist-filtros-linha {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.hist-filtros-linha .hist-filtro-status {
+  flex: 1;
+  min-width: 140px;
+  margin-bottom: 0;
+}
+/* ---- Badge "Via App" no histórico ---- */
+.col-via-site {
+  text-align: center;
+}
+.badge-site-sim {
+  display: inline-block;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 2px 7px;
+  letter-spacing: 0.02em;
+}
+.badge-site-nao {
+  color: #9ca3af;
+  font-size: 0.9rem;
+}
+
 /* ---- Botão e badge no modal Connect ---- */
 .btn-marcar-connect {
   display: flex;
@@ -2570,4 +2601,40 @@ body {
   align-items: center;
   gap: 6px;
   padding: 4px 0;
+}
+
+/* =========================================
+   LAYOUT DESKTOP (≥ 900px)
+   ========================================= */
+@media (min-width: 900px) {
+  .container {
+    max-width: 1100px;
+    padding: 20px 40px;
+  }
+
+  .tela-admin {
+    max-width: 1100px;
+    padding: 0 40px 48px;
+  }
+
+  .modal-content {
+    max-width: 860px;
+  }
+
+  .lista-contratos {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .header {
+    padding: 18px 40px;
+  }
+
+  .filters {
+    padding: 16px 20px;
+  }
+
+  .admin-secao {
+    padding: 16px 0;
+  }
 }

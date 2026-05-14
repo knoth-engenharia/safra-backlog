@@ -3087,6 +3087,8 @@ function renderizarHistoricoHTML(lista) {
 
   const filtroStatus =
     document.getElementById("adm-filter-hist-status")?.value || "Retirado";
+  const filtroSite =
+    document.getElementById("adm-filter-hist-site")?.value || "Todos";
 
   const baixas = lista
     .filter((c) => {
@@ -3094,12 +3096,15 @@ function renderizarHistoricoHTML(lista) {
         return c.status === "Retirado" || c.status === "Quebra" || c.status === "Parcial";
       return c.status === filtroStatus;
     })
+    .filter((c) => filtroSite !== "Site" || c.baixaSite === "Sim")
     .sort((a, b) => parseDateBR(b.dataExec) - parseDateBR(a.dataExec));
+
+  const filtrosHTML = `<div class="hist-filtros-linha">${criarFiltroHistStatus(filtroStatus)}${criarFiltroHistSite(filtroSite)}</div>`;
 
   if (!baixas.length) {
     return `<div class="admin-secao">
       ${criarToggleHistSubView()}
-      ${criarFiltroHistStatus(filtroStatus)}
+      ${filtrosHTML}
       <div class="estado-vazio"><p>Nenhuma baixa encontrada.</p></div>
     </div>`;
   }
@@ -3107,6 +3112,9 @@ function renderizarHistoricoHTML(lista) {
   const linhas = baixas
     .map((c) => {
       const cls = statusParaClasse(c.status);
+      const viaSite = c.baixaSite === "Sim"
+        ? `<span class="badge-site-sim" title="Baixa registrada pelo App">App</span>`
+        : `<span class="badge-site-nao">—</span>`;
       const connectBadge = c.noConnect
         ? `<span class="badge-connect-ok" title="Lançado no Connect">✓</span>`
         : `<span class="badge-connect-pendente" title="Pendente no Connect">—</span>`;
@@ -3118,6 +3126,7 @@ function renderizarHistoricoHTML(lista) {
         <td>${c.tecnicoExec ? escHtml(c.tecnicoExec) : "—"}</td>
         <td class="col-data">${c.dataExec ? escHtml(c.dataExec.split(" ")[0]) : "—"}</td>
         <td class="col-connect">${connectBadge}</td>
+        <td class="col-via-site">${viaSite}</td>
       </tr>`;
     })
     .join("");
@@ -3125,11 +3134,11 @@ function renderizarHistoricoHTML(lista) {
   return `
     <div class="admin-secao">
       ${criarToggleHistSubView()}
-      ${criarFiltroHistStatus(filtroStatus)}
+      ${filtrosHTML}
       <p class="historico-count">${baixas.length} registro(s)</p>
       <div class="tabela-scroll">
         <table class="admin-table">
-          <thead><tr><th>Contrato</th><th>Nome</th><th>Cidade</th><th>Status</th><th>Técnico</th><th>Data</th><th>Connect</th></tr></thead>
+          <thead><tr><th>Contrato</th><th>Nome</th><th>Cidade</th><th>Status</th><th>Técnico</th><th>Data</th><th>Connect</th><th>Via App</th></tr></thead>
           <tbody>${linhas}</tbody>
         </table>
       </div>
@@ -3137,20 +3146,28 @@ function renderizarHistoricoHTML(lista) {
 }
 
 function renderizarHistoricoPosDiaHTML(lista) {
+  const filtroSite =
+    document.getElementById("adm-filter-hist-site")?.value || "Todos";
+
   const umMesAtras = new Date();
   umMesAtras.setMonth(umMesAtras.getMonth() - 1);
   umMesAtras.setHours(0, 0, 0, 0);
+
+  const filtrosHTML = criarFiltroHistSite(filtroSite);
 
   const comExec = lista.filter((c) => {
     if (!c.dataExec) return false;
     if (c.status !== "Retirado" && c.status !== "Parcial" && c.status !== "Quebra") return false;
     const dt = parseDateBR(c.dataExec);
-    return dt && dt >= umMesAtras;
+    if (!dt || dt < umMesAtras) return false;
+    if (filtroSite === "Site" && c.baixaSite !== "Sim") return false;
+    return true;
   });
 
   if (!comExec.length) {
     return `<div class="admin-secao">
       ${criarToggleHistSubView()}
+      ${filtrosHTML}
       <div class="estado-vazio"><p>Nenhuma execução encontrada.</p></div>
     </div>`;
   }
@@ -3190,6 +3207,7 @@ function renderizarHistoricoPosDiaHTML(lista) {
   return `
     <div class="admin-secao">
       ${criarToggleHistSubView()}
+      ${filtrosHTML}
       <div class="hist-dia-resumo">
         <span class="hist-dia-chip chip-ret">Retirados: <strong>${totRet}</strong></span>
         <span class="hist-dia-chip chip-par">Parciais: <strong>${totPar}</strong></span>
@@ -3221,6 +3239,16 @@ function criarFiltroHistStatus(valorAtual) {
       <option value="Retirado" ${valorAtual === "Retirado" ? "selected" : ""}>Somente Retirados</option>
       <option value="Quebra" ${valorAtual === "Quebra" ? "selected" : ""}>Somente Quebras</option>
       <option value="Todos" ${valorAtual === "Todos" ? "selected" : ""}>Todos (Ret. + Quebra)</option>
+    </select>
+  </div>`;
+}
+
+function criarFiltroHistSite(valorAtual) {
+  return `<div class="hist-filtro-status">
+    <label class="hist-filtro-label">Origem:</label>
+    <select id="adm-filter-hist-site" class="input-select-sm" onchange="renderizarAdmin()">
+      <option value="Todos" ${valorAtual === "Todos" ? "selected" : ""}>Todos</option>
+      <option value="Site" ${valorAtual === "Site" ? "selected" : ""}>Somente via App</option>
     </select>
   </div>`;
 }
@@ -3266,6 +3294,29 @@ function calcularICGPorCidade(lista) {
   return Object.values(mapa).sort((a, b) => a.cidade.localeCompare(b.cidade));
 }
 
+// Variante "Via App": conta apenas execuções com BAIXA_SITE="Sim" + todos os pendentes
+function calcularICGPorCidadeViaSite(lista) {
+  const mapa = {};
+  lista.forEach((c) => {
+    const cidade = c.cidade || "—";
+    if (!mapa[cidade])
+      mapa[cidade] = { cidade, mix: { desc: 0, rec: 0 }, opcao: { desc: 0, rec: 0 }, inad: { desc: 0, rec: 0 } };
+    const r = mapa[cidade];
+    const isPendente = c.status === "Pendente";
+    const isViaSite = c.baixaSite === "Sim";
+    const executadoViaSite =
+      (c.status === "Retirado" || c.status === "Parcial" || c.status === "Quebra") && isViaSite;
+    if (!isPendente && !executadoViaSite) return;
+    const recuperado = (c.status === "Retirado" || c.status === "Parcial") && isViaSite;
+    r.mix.desc++;
+    if (recuperado) r.mix.rec++;
+    const cat = categoriaTipo(c);
+    if (cat === "opcao") { r.opcao.desc++; if (recuperado) r.opcao.rec++; }
+    else if (cat === "inad") { r.inad.desc++; if (recuperado) r.inad.rec++; }
+  });
+  return Object.values(mapa).sort((a, b) => a.cidade.localeCompare(b.cidade));
+}
+
 function icgCells(grp, meta) {
   if (!grp.desc) return `<td>—</td><td>—</td><td>—</td><td>—</td>`;
   const pend = grp.desc - grp.rec;
@@ -3298,11 +3349,21 @@ function icgCellsMix(grp, meta) {
 }
 
 function renderizarRelatorioHTML() {
+  const filtroSiteRel = document.getElementById("adm-filter-rel-site")?.value || "Todos";
   const lista = getContratosAdmin();
-  const dados = calcularICGPorCidade(lista);
+  const dados = filtroSiteRel === "Site"
+    ? calcularICGPorCidadeViaSite(lista)
+    : calcularICGPorCidade(lista);
   const META_MIX = 0.78;
   const META_OPCAO = 1.0;
   const META_INAD = 0.7;
+  const filtroSiteRelHTML = `<div class="hist-filtro-status" style="margin-bottom:12px">
+    <label class="hist-filtro-label">Escopo:</label>
+    <select id="adm-filter-rel-site" class="input-select-sm" onchange="renderizarAdmin()">
+      <option value="Todos" ${filtroSiteRel === "Todos" ? "selected" : ""}>Todos os contratos</option>
+      <option value="Site" ${filtroSiteRel === "Site" ? "selected" : ""}>Somente via App (+ pendentes)</option>
+    </select>
+  </div>`;
 
   const linhas = dados
     .map(
@@ -3336,7 +3397,9 @@ function renderizarRelatorioHTML() {
       </table>
     </div>`;
 
-  const periodos = calcularEficienciaPeriodos();
+  const periodos = filtroSiteRel === "Site"
+    ? calcularEficienciaPeriodosViaSite()
+    : calcularEficienciaPeriodos();
   const linhasEfic = periodos
     .map((p) => {
       const taxa =
@@ -3364,6 +3427,7 @@ function renderizarRelatorioHTML() {
   return `
     <div class="admin-secao">
       <h3 class="admin-secao-titulo">ICG por Cidade</h3>
+      ${filtroSiteRelHTML}
       ${tabelaHTML}
       <div class="relatorio-btns">
         <button class="btn btn-relatorio" onclick="baixarCSVicg()"><i data-lucide="download" class="icon icon-sm"></i> Baixar ICG CSV</button>
@@ -3407,6 +3471,37 @@ function calcularEficienciaPeriodos() {
       meses[chave].parciais++;
       meses[chave].retirados++;
     } else meses[chave].pendentes++;
+  });
+  return Object.entries(meses)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .slice(0, 6)
+    .map(([, v]) => v);
+}
+
+// Variante "Via App": execuções com BAIXA_SITE="Sim" + todos os pendentes, agrupados por DATA_PEND
+function calcularEficienciaPeriodosViaSite() {
+  const lista = getContratosAdminSemPeriodo();
+  const meses = {};
+  lista.forEach((c) => {
+    if (!c.dataPend) return;
+    const m = c.dataPend.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!m) return;
+    const isPendente = c.status === "Pendente";
+    const isViaSite = c.baixaSite === "Sim";
+    const executadoViaSite =
+      (c.status === "Retirado" || c.status === "Parcial" || c.status === "Quebra") && isViaSite;
+    if (!isPendente && !executadoViaSite) return;
+    const chave = `${m[3]}-${m[2]}`;
+    const label = `${m[2]}/${m[3]}`;
+    if (!meses[chave])
+      meses[chave] = { label, total: 0, retirados: 0, quebras: 0, pendentes: 0, parciais: 0 };
+    meses[chave].total++;
+    if (c.status === "Retirado" && isViaSite) meses[chave].retirados++;
+    else if (c.status === "Quebra" && isViaSite) meses[chave].quebras++;
+    else if (c.status === "Parcial" && isViaSite) {
+      meses[chave].parciais++;
+      meses[chave].retirados++;
+    } else if (isPendente) meses[chave].pendentes++;
   });
   return Object.entries(meses)
     .sort(([a], [b]) => b.localeCompare(a))

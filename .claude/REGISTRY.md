@@ -194,7 +194,10 @@
 - L2802 `renderizarHistoricoHTML(lista)` — lista de execuções com filtro de status
 - L2856 `renderizarHistoricoPosDiaHTML(lista)` — tabela agrupada por dia (últimos 30 dias)
 - L2934 `criarFiltroHistStatus(valorAtual)` — select de filtro Retirado/Quebra/Todos
+- `criarFiltroHistSite(valorAtual)` — select de filtro Todos/Somente via App (BAIXA_SITE)
 - L2958 `calcularICGPorCidade(lista)` — agrupa contratos por cidade para tabela ICG
+- `calcularICGPorCidadeViaSite(lista)` — variante: só BAIXA_SITE=Sim (exec) + todos pendentes
+- `calcularEficienciaPeriodosViaSite()` — variante: só BAIXA_SITE=Sim (exec) + todos pendentes, agrupados por DATA_PEND
 - L2986 `icgCells(grp, meta)` / L3000 `icgCellsMix(grp, meta)` — células da tabela ICG
 - L3017 `renderizarRelatorioHTML()` — tabela ICG + eficiência por período
 - L3134 `baixarCSV()` — exporta histórico como CSV
@@ -321,3 +324,9 @@ Engenharia/
 | 2026-05-14 | IDB_VERSION 1→2: nova store `notif_agendamentos` para bridge com SW |
 | 2026-05-14 | Notificações: `pedirPermissaoNotificacao()`, `agendarNotificacoesHoje()`, `_dispararNotificacao()`, `cancelarNotificacoes()` — 15min/1h/hora exata |
 | 2026-05-14 | `sw.js` v3: `periodicsync` handler + `notificationclick` handler — resumo diário quando app fechado (Chrome Android PWA) |
+| 2026-05-14 | Histórico admin: coluna "Via App" adicionada; filtro "Origem" (Todos / Somente via App) via `criarFiltroHistSite()` |
+| 2026-05-14 | Relatório admin: filtro "Escopo" (Todos / Somente via App + pendentes); `calcularICGPorCidadeViaSite()` e `calcularEficienciaPeriodosViaSite()` adicionados |
+| 2026-05-14 | CSS: `.hist-filtros-linha`, `.badge-site-sim`, `.badge-site-nao`, `.col-via-site` adicionados |
+| 2026-05-14 | `renderizarHistoricoPosDiaHTML`: filtros Mostrar + Origem adicionados (mesmos da sub-view Lista) |
+| 2026-05-14 | CSS: `.hist-filtros-linha .hist-filtro-status` → `flex:1` para ocupar largura total |
+| 2026-05-14 | CSS: `@media (min-width:900px)` — layout desktop: `.container`/`.tela-admin` → 1100px, `.lista-contratos` → 2 colunas, modal → 860px |
