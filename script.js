@@ -4,7 +4,7 @@
 // URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
 // Ver instruções em gas/Codigo.gs
 const GAS_URL =
-  "https://script.google.com/macros/s/AKfycbzKtjibJi2sTEQ-_YY1UEa2tzZX6Un_UltqCnkEQlomwxZcGn-UJsPrqKqBgKLetXL-/exec";
+  "https://script.google.com/macros/s/AKfycbwBAzHJmkbZl_qg6RELgfU9aEWodocwH4xuUOD27BGRNFKyix3G8Pe2jYxmI4cX0n1s/exec";
 
 // Cloudinary — upload de fotos (plano gratuito: 25GB storage)
 // Como configurar: ver instruções abaixo de CLOUDINARY_UPLOAD_PRESET
@@ -1048,7 +1048,20 @@ async function lerContratosIDB(usuario) {
         .transaction("contratos_cache")
         .objectStore("contratos_cache")
         .get(`data_${usuario || "default"}`);
-      req.onsuccess = () => resolve(req.result?.lista ?? null);
+      req.onsuccess = () => {
+        const record = req.result;
+        if (!record) {
+          resolve(null);
+          return;
+        }
+        // TTL de 4 horas — evita trabalhar com dados muito desatualizados
+        const MAX_AGE = 4 * 60 * 60 * 1000;
+        if (Date.now() - (record.ts || 0) > MAX_AGE) {
+          resolve(null);
+          return;
+        }
+        resolve(record.lista ?? null);
+      };
       req.onerror = () => resolve(null);
     });
   } catch {
@@ -1325,7 +1338,13 @@ async function carregarContratos() {
 async function _fetchContratos(usuario, silencioso) {
   _setCarregando(+1);
   try {
-    const resposta = await fetch(`${GAS_URL}?sheet=SAFRA`);
+    const tecnico = tecnicoLogado();
+    let url = `${GAS_URL}?sheet=SAFRA`;
+    // Técnicos com cidades definidas: GAS filtra server-side antes de enviar
+    if (tecnico?.cidades?.length) {
+      url += `&usuario=${encodeURIComponent(tecnico.usuario)}&cidades=${encodeURIComponent(tecnico.cidades.join(","))}`;
+    }
+    const resposta = await fetch(url);
     if (!resposta.ok) throw new Error(`Erro HTTP ${resposta.status}`);
     const resJson = await resposta.json();
     if (resJson.error) throw new Error(resJson.error);
