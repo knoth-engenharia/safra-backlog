@@ -16,16 +16,20 @@
 
 ## Session Start Protocol ⚡
 
-**MANDATORY** ao início de cada sessão:
+**MANDATORY** ao início de cada sessão — ler NESTA ORDEM:
 
 ```
-✓ .claude/COMMON_MISTAKES.md      # ⚠️ CRÍTICO - Ler PRIMEIRO
-✓ .claude/QUICK_START.md          # Comandos e configuração
-✓ .claude/ARCHITECTURE_MAP.md     # Mapa de arquivos
+1. .claude/REGISTRY.md          # 🗂️ PRIMEIRO — estado atual completo do código
+2. .claude/COMMON_MISTAKES.md   # ⚠️ SEGUNDO — bugs conhecidos
+3. .claude/QUICK_START.md       # Comandos e configuração (se necessário)
 ```
 
-**Ao concluir tarefa:**
-- Criar doc em `.claude/completions/YYYY-MM-DD-tarefa.md`
+> O REGISTRY tem mapa de funções com linha exata, colunas da planilha, features implementadas
+> e regras de negócio. Leia-o antes de qualquer edição para não duplicar ou quebrar nada.
+
+**Ao concluir qualquer tarefa:**
+- Atualizar a tabela `CHANGELOG DO REGISTRO` no `.claude/REGISTRY.md`
+- Atualizar seções afetadas do REGISTRY (funções adicionadas/removidas, novas colunas, etc.)
 - Atualizar `.claude/COMMON_MISTAKES.md` se encontrou bug novo
 
 ---
@@ -66,12 +70,12 @@ Ver plano completo em: `docs/PLANO_DESENVOLVIMENTO.md`
 
 ## Navegação da Documentação
 
+- **Registro vivo**: `.claude/REGISTRY.md` 🗂️ **LER PRIMEIRO — funções, linhas, colunas, features**
 - **Erros comuns**: `.claude/COMMON_MISTAKES.md` ⚠️ **OBRIGATÓRIO**
 - **Comandos**: `.claude/QUICK_START.md`
-- **Arquivos**: `.claude/ARCHITECTURE_MAP.md`
+- **Roadmap / estratégia**: `docs/ROADMAP_MELHORIAS.md`
 - **Plano completo**: `docs/PLANO_DESENVOLVIMENTO.md`
-- **Índice docs**: `docs/INDEX.md`
 
 ---
 
-**Last Updated**: 2026-05-06
+**Last Updated**: 2026-05-14
