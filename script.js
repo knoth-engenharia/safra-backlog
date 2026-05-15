@@ -24,7 +24,7 @@ const COL_LAT_EXEC = "LAT_EXEC";
 const COL_LNG_EXEC = "LNG_EXEC";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "1.2";
+const APP_VERSION = "1.21";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
