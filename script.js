@@ -2396,6 +2396,7 @@ async function executarSalvamento(camposBase, novoStatus) {
     const geoPromise = capturarGeolocalizacao();
 
     let fotoExec = "";
+    let erroFoto = null;
     if (
       CLOUDINARY_CLOUD_NAME !== "SEU_CLOUD_NAME" &&
       fotosParaUpload.length &&
@@ -2405,6 +2406,7 @@ async function executarSalvamento(camposBase, novoStatus) {
         fotoExec = await uploadTodasFotos(fotosParaUpload);
       } catch (e) {
         console.warn("Falha no upload de fotos:", e);
+        erroFoto = e;
       }
     }
 
@@ -2434,6 +2436,15 @@ async function executarSalvamento(camposBase, novoStatus) {
     salvarContratosIDB(contratos, tecnicoLogado()?.usuario);
     agendarNotificacoesHoje();
     mostrarToast("Baixa registrada com sucesso.", "sucesso");
+    if (erroFoto) {
+      const motivo = erroFoto.message || "erro de memória ou conexão instável";
+      setTimeout(() => {
+        mostrarToast(
+          `Evidências não enviadas: ${motivo}. A baixa foi registrada normalmente, mas sem as fotos.`,
+          "aviso",
+        );
+      }, 3800);
+    }
   } catch (erro) {
     if (erro instanceof OfflineError) {
       if (idx !== -1) contratos[idx]._pendente = true;
@@ -2536,12 +2547,12 @@ async function uploadTodasFotos(arquivos) {
     const url = await uploadFoto(file);
     urls.push(url);
   }
-  return urls.join("|");
+  return urls.join(" | ");
 }
 
 // Comprime foto via Canvas antes de armazenar — reduz de ~5MB para ~300KB
 // Resolve "espaço insuficiente" em dispositivos com pouca memória
-async function comprimirFoto(file, maxLado = 1920, qualidade = 0.82) {
+async function comprimirFoto(file, maxLado = 1280, qualidade = 0.82) {
   return new Promise((resolve) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -2563,10 +2574,12 @@ async function comprimirFoto(file, maxLado = 1920, qualidade = 0.82) {
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
       canvas.toBlob(
         (blob) => {
+          canvas.width = 0; // libera buffer RGBA do canvas imediatamente
+          canvas.height = 0;
           if (!blob) {
             resolve(file);
             return;
-          } // toBlob falhou — usa original
+          }
           const nome = file.name.replace(/\.\w+$/, ".jpg");
           resolve(new File([blob], nome, { type: "image/jpeg" }));
         },
@@ -2607,8 +2620,10 @@ function configurarPreviewFotos() {
     const preview = document.getElementById("foto-preview");
     if (preview)
       preview.innerHTML = `<span class="foto-comprimindo">Processando...</span>`;
-    const comprimidos = await Promise.all(Array.from(files).map(comprimirFoto));
-    _fotoArquivos.push(...comprimidos);
+    for (const file of Array.from(files)) {
+      const comprimido = await comprimirFoto(file);
+      _fotoArquivos.push(comprimido);
+    }
     renderizarPreviewFotos();
   }
 
@@ -2627,23 +2642,25 @@ function configurarPreviewFotos() {
 function renderizarPreviewFotos() {
   const preview = document.getElementById("foto-preview");
   if (!preview) return;
+  // Revoga blob URLs anteriores antes de limpar o DOM
+  preview.querySelectorAll("img[data-blob-url]").forEach((img) => {
+    URL.revokeObjectURL(img.dataset.blobUrl);
+  });
   preview.innerHTML = "";
   _fotoArquivos.forEach((file, idx) => {
     const wrap = document.createElement("div");
     wrap.className = "foto-thumb-wrap";
     const img = document.createElement("img");
     img.className = "foto-thumb-preview";
-    // FileReader (data URL) é mais confiável que ObjectURL para preview
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
+    const blobUrl = URL.createObjectURL(file);
+    img.src = blobUrl;
+    img.dataset.blobUrl = blobUrl;
     const btn = document.createElement("button");
     btn.className = "foto-thumb-remove";
     btn.title = "Remover";
     btn.textContent = "×";
     btn.addEventListener("click", () => {
+      URL.revokeObjectURL(blobUrl);
       _fotoArquivos.splice(idx, 1);
       renderizarPreviewFotos();
     });
@@ -2655,7 +2672,7 @@ function renderizarPreviewFotos() {
 
 function criarFotosModal(fotoExec) {
   if (!fotoExec?.trim()) return "";
-  const urls = fotoExec.split("|").filter(Boolean);
+  const urls = fotoExec.split(/\s*\|\s*/).filter(Boolean);
   const thumbs = urls
     .map(
       (url) =>
@@ -2962,7 +2979,7 @@ function renderizarHistoricoPessoal() {
         ? `<div class="mh-obs">${escHtml(c.obsExec)}</div>`
         : "";
       const fotos = c.fotoExec
-        ? `<span class="mh-badge-foto"><i data-lucide="camera" class="icon icon-xs"></i> ${c.fotoExec.split("|").filter(Boolean).length} foto(s)</span>`
+        ? `<span class="mh-badge-foto"><i data-lucide="camera" class="icon icon-xs"></i> ${c.fotoExec.split(/\s*\|\s*/).filter(Boolean).length} foto(s)</span>`
         : "";
       return `<div class="mh-item" onclick="abrirModalPorId('${escHtml(c.id)}')">
       <div class="mh-item-header">
