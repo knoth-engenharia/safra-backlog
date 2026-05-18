@@ -3357,6 +3357,8 @@ function renderizarHistoricoHTML(lista) {
           c.status === "Quebra" ||
           c.status === "Parcial"
         );
+      if (filtroStatus === "Retirado")
+        return c.status === "Retirado" || c.status === "Parcial";
       return c.status === filtroStatus;
     })
     .filter((c) => filtroSite !== "Site" || c.baixaSite === "Sim")
@@ -3514,9 +3516,9 @@ function criarFiltroHistStatus(valorAtual) {
   return `<div class="hist-filtro-status">
     <label class="hist-filtro-label">Mostrar:</label>
     <select id="adm-filter-hist-status" class="input-select-sm" onchange="renderizarAdmin()">
-      <option value="Retirado" ${valorAtual === "Retirado" ? "selected" : ""}>Somente Retirados</option>
+      <option value="Retirado" ${valorAtual === "Retirado" ? "selected" : ""}>Retirado + Parcial</option>
       <option value="Quebra" ${valorAtual === "Quebra" ? "selected" : ""}>Somente Quebras</option>
-      <option value="Todos" ${valorAtual === "Todos" ? "selected" : ""}>Todos (Ret. + Quebra)</option>
+      <option value="Todos" ${valorAtual === "Todos" ? "selected" : ""}>Todos</option>
     </select>
   </div>`;
 }
