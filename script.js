@@ -4,7 +4,7 @@
 // URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
 // Ver instruções em gas/Codigo.gs
 const GAS_URL =
-  "https://script.google.com/macros/s/AKfycbwBAzHJmkbZl_qg6RELgfU9aEWodocwH4xuUOD27BGRNFKyix3G8Pe2jYxmI4cX0n1s/exec";
+  "https://script.google.com/macros/s/AKfycbyV1YaxH1qfGnLecZd0IYJ1h2V22gl--k25EBwFGPVlW4tTsKq89vb8kRXfE9aEn4pq/exec";
 
 // Cloudinary — upload de fotos (plano gratuito: 25GB storage)
 // Como configurar: ver instruções abaixo de CLOUDINARY_UPLOAD_PRESET
@@ -22,9 +22,10 @@ const COL_VISITAS = "VISITAS";
 const COL_NO_CONNECT = "NO_CONNECT";
 const COL_LAT_EXEC = "LAT_EXEC";
 const COL_LNG_EXEC = "LNG_EXEC";
+const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "1.21";
+const APP_VERSION = "2.0";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -118,6 +119,43 @@ function formatarData(str, incluirHora = false) {
 
 function renderIcons() {
   if (window.lucide) lucide.createIcons();
+}
+
+// =========================================
+// WHATSAPP
+// =========================================
+function formatarTelefone(tel) {
+  const d = tel.replace(/\D/g, "");
+  if (d.startsWith("55") && d.length >= 12) return d; // já tem código país
+  if (d.length === 11) return "55" + d; // DDD + 9 dígitos
+  if (d.length === 10) return "55" + d.slice(0, 2) + "9" + d.slice(2); // DDD + 8 → insere 9
+  return "55" + d;
+}
+
+function registrarMsgEnviada(contratoId, event) {
+  if (event) event.stopPropagation();
+  const idx = contratos.findIndex((c) => c.id === contratoId);
+  if (idx === -1) return;
+  const agora = formatarDataExec();
+  contratos[idx] = { ...contratos[idx], msgEnviada: agora };
+  salvarContratosIDB(contratos, tecnicoLogado()?.usuario);
+  // Persiste na planilha em background
+  const contrato = contratos[idx];
+  if (navigator.onLine) {
+    const fd = new FormData();
+    fd.append(
+      "payload",
+      JSON.stringify({
+        sheet: "SAFRA",
+        keyCol: "CONTRATO",
+        keyVal: contrato.contrato,
+        data: { [COL_MSG_ENVIADA]: agora },
+      }),
+    );
+    fetch(GAS_URL, { method: "POST", body: fd }).catch(() => {});
+  }
+  // Atualiza o card na tela sem recarregar tudo
+  setTimeout(() => aplicarFiltros(), 150);
 }
 
 // ---- SLA ----
@@ -980,6 +1018,8 @@ function mapearContrato(linha, indice) {
     tecnicoDesig: linha["TECNICO_DESIG"] || "",
     status: linha["STATUS"] || "Pendente",
     noConnect: linha[COL_NO_CONNECT] || "",
+    texto1: linha["TEXTO 1"] || "",
+    msgEnviada: linha[COL_MSG_ENVIADA] || "",
     _raw: linha,
   };
 }
@@ -1895,6 +1935,11 @@ function criarCartaoHTML(c) {
   const endExib = novoEnd || c.endereco;
   const telExib =
     c.telefone || c.telCelular || c.telComercial || c.outros || "";
+  const telParaWa = telExib;
+  const waHref =
+    telParaWa && c.texto1
+      ? `whatsapp://send?phone=${formatarTelefone(telParaWa)}&text=${encodeURIComponent(c.texto1)}`
+      : null;
   const usuario = tecnicoLogado()?.usuario?.toLowerCase() || "";
   const agendado =
     c.obs1?.trim().toUpperCase() === "AGENDADO" &&
@@ -1935,6 +1980,10 @@ function criarCartaoHTML(c) {
     ? `<div class="cartao-data-exec">Exec: ${escHtml(c.dataExec)}${c.tecnicoExec ? ` · ${escHtml(c.tecnicoExec)}` : ""}</div>`
     : "";
 
+  const msgEnviadaHTML = c.msgEnviada
+    ? `<div class="cartao-msg-enviada"><i data-lucide="check" class="icon icon-xs"></i> Msg enviada ${escHtml(c.msgEnviada)}</div>`
+    : "";
+
   const tipoBadge = c.tipoDesconexao
     ? `<span class="badge-tipo badge-tipo-${escHtml(c.tipoDesconexao.toLowerCase())}">${escHtml(c.tipoDesconexao)}</span>`
     : "";
@@ -1954,7 +2003,10 @@ function criarCartaoHTML(c) {
         ${escHtml(c.cidade)} — ${escHtml(c.bairro)}<br/>
         <div class="end-row">
           <span>${novoEnd ? `<span class="tag-novo-end">Novo end.</span> ` : ""}${escHtml(endExib)}</span>
-          <a href="${mapsUrl}" class="btn-mapa-card" target="_blank" onclick="event.stopPropagation()" title="Ver no mapa"><i data-lucide="map-pin" class="icon icon-sm"></i></a>
+          <div class="end-row-acoes">
+            <a href="${mapsUrl}" class="btn-mapa-card" target="_blank" onclick="event.stopPropagation()" title="Ver no mapa"><i data-lucide="map-pin" class="icon icon-sm"></i></a>
+            ${waHref ? `<a href="${waHref}" class="btn-wa-card${c.msgEnviada ? " btn-wa-enviado" : ""}" onclick="registrarMsgEnviada('${escHtml(c.id)}', event)" title="${c.msgEnviada ? "Mensagem já enviada" : "Enviar pelo WhatsApp"}"><i data-lucide="message-circle" class="icon icon-sm"></i></a>` : ""}
+          </div>
         </div>
         ${telExib ? `<br/>${escHtml(telExib)}` : ""}
       </div>
@@ -1966,6 +2018,7 @@ function criarCartaoHTML(c) {
         ${tipoBadge}
       </div>
       ${dataExecHTML}
+      ${msgEnviadaHTML}
     </div>`;
 }
 
@@ -2090,6 +2143,23 @@ function abrirModal(contrato) {
         : ""
     }
 
+    ${(() => {
+      const telWa =
+        contrato.telefone ||
+        contrato.telCelular ||
+        contrato.telComercial ||
+        contrato.outros ||
+        "";
+      if (!telWa || !contrato.texto1) return "";
+      const waUrl = `whatsapp://send?phone=${formatarTelefone(telWa)}&text=${encodeURIComponent(contrato.texto1)}`;
+      return `<div class="secao-wa-modal">
+        <a href="${waUrl}" class="btn-wa-modal${contrato.msgEnviada ? " btn-wa-enviado" : ""}" onclick="registrarMsgEnviada('${escHtml(contrato.id)}', event)">
+          <i data-lucide="message-circle" class="icon icon-sm"></i>
+          ${contrato.msgEnviada ? "Reenviar mensagem" : "Enviar mensagem WhatsApp"}
+        </a>
+        ${contrato.msgEnviada ? `<span class="msg-enviada-info"><i data-lucide="check-circle" class="icon icon-xs"></i> Enviada em ${escHtml(contrato.msgEnviada)}</span>` : ""}
+      </div>`;
+    })()}
     <div class="secao-telefones">${criarBotoesPhone(contrato)}</div>
     <div class="acoes" id="acoes-modal">${criarAcoesHTML()}</div>
     ${tecnicoLogado()?.adm ? `<button class="btn-connect" onclick="abrirModalConnect(contratoAtivo)"><i data-lucide="clipboard-list" class="icon icon-sm"></i> Dados para Connect</button>` : ""}`;
