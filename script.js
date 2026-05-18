@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "2.0";
+const APP_VERSION = "2.1";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
