@@ -4,7 +4,7 @@
 // URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
 // Ver instruções em gas/Codigo.gs
 const GAS_URL =
-  "https://script.google.com/macros/s/AKfycbyV1YaxH1qfGnLecZd0IYJ1h2V22gl--k25EBwFGPVlW4tTsKq89vb8kRXfE9aEn4pq/exec";
+  "https://script.google.com/macros/s/AKfycbylxna2C5aejNSIKkm3vhQylhZNuUOuNJY4zUNQNpU-SUDErktULihYv9BakCERtk2Z/exec";
 
 // Cloudinary — upload de fotos (plano gratuito: 25GB storage)
 // Como configurar: ver instruções abaixo de CLOUDINARY_UPLOAD_PRESET
