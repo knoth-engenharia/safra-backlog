@@ -4,7 +4,7 @@
 // URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
 // Ver instruções em gas/Codigo.gs
 const GAS_URL =
-  "https://script.google.com/macros/s/AKfycbylxna2C5aejNSIKkm3vhQylhZNuUOuNJY4zUNQNpU-SUDErktULihYv9BakCERtk2Z/exec";
+  "https://script.google.com/macros/s/AKfycbzrbetyfU6a4DK1AOAac2puIxHDlyL2C6gFRXGa9eiwB53Jij0UMyYAScFyPsYBRsfU/exec";
 
 // Cloudinary — upload de fotos (plano gratuito: 25GB storage)
 // Como configurar: ver instruções abaixo de CLOUDINARY_UPLOAD_PRESET
@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "2.1";
+const APP_VERSION = "2.2";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -1020,7 +1020,6 @@ function mapearContrato(linha, indice) {
     noConnect: linha[COL_NO_CONNECT] || "",
     texto1: linha["TEXTO 1"] || "",
     msgEnviada: linha[COL_MSG_ENVIADA] || "",
-    _raw: linha,
   };
 }
 
@@ -2279,8 +2278,8 @@ function criarAcoesHTML() {
 // --- Persistência de estado do modal (câmera Android mata a página) ---
 function _salvarEstadoModal(updates) {
   try {
-    const raw = sessionStorage.getItem("safra_modal_state") || "{}";
-    sessionStorage.setItem(
+    const raw = localStorage.getItem("safra_modal_state") || "{}";
+    localStorage.setItem(
       "safra_modal_state",
       JSON.stringify({ ...JSON.parse(raw), ...updates }),
     );
@@ -2289,13 +2288,13 @@ function _salvarEstadoModal(updates) {
 
 function _limparEstadoModal() {
   try {
-    sessionStorage.removeItem("safra_modal_state");
+    localStorage.removeItem("safra_modal_state");
   } catch {}
 }
 
 function _tentarRestaurarModal() {
   try {
-    const raw = sessionStorage.getItem("safra_modal_state");
+    const raw = localStorage.getItem("safra_modal_state");
     if (!raw) return;
     const state = JSON.parse(raw);
     if (!state?.contratoId) return;
@@ -2546,6 +2545,15 @@ function mostrarStatusUpload(msg) {
 
 function fecharModal() {
   _limparEstadoModal();
+  // Revoga blob URLs do preview e limpa array — evita acúmulo de blobs entre aberturas
+  const preview = document.getElementById("foto-preview");
+  if (preview) {
+    preview
+      .querySelectorAll("img[data-blob-url]")
+      .forEach((img) => URL.revokeObjectURL(img.dataset.blobUrl));
+    preview.innerHTML = "";
+  }
+  _fotoArquivos = [];
   document.getElementById("modal").classList.add("hidden");
   contratoAtivo = null;
 }
@@ -2642,6 +2650,7 @@ async function comprimirFoto(file, maxLado = 1280, qualidade = 0.82) {
       canvas.width = w;
       canvas.height = h;
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      img.src = ""; // libera decoded image da memória antes de gerar o blob
       canvas.toBlob(
         (blob) => {
           canvas.width = 0; // libera buffer RGBA do canvas imediatamente
