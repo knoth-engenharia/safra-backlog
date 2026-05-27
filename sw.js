@@ -2,7 +2,7 @@
 // SERVICE WORKER — Backlog Safra v3
 // Incrementar CACHE_NAME para forçar atualização
 // =============================================
-const CACHE_NAME = "backlog-safra-v3";
+const CACHE_NAME = "backlog-safra-v4";
 
 const STATIC_ASSETS = [
   "./",

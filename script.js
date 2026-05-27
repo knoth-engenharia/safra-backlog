@@ -2459,60 +2459,55 @@ async function executarSalvamento(camposBase, novoStatus) {
   fecharModal(); // também chama _limparEstadoModal()
   aplicarFiltros();
 
-  // GPS + fotos + save em background — loading bar indica progresso
+  // Salva estado otimista no IDB IMEDIATAMENTE — se o Android matar a página
+  // durante o upload/GPS, o IDB já tem o novo status e não reverte ao recarregar
+  const usuarioAtual = tecnicoLogado()?.usuario;
+  salvarContratosIDB(contratos, usuarioAtual);
+
+  // GPS + escrita GAS em background — loading bar indica progresso
   _setCarregando(+1);
   try {
-    const geoPromise = capturarGeolocalizacao();
-
-    let fotoExec = "";
-    let erroFoto = null;
-    if (
-      CLOUDINARY_CLOUD_NAME !== "SEU_CLOUD_NAME" &&
-      fotosParaUpload.length &&
-      navigator.onLine
-    ) {
-      try {
-        fotoExec = await uploadTodasFotos(fotosParaUpload);
-      } catch (e) {
-        console.warn("Falha no upload de fotos:", e);
-        erroFoto = e;
-      }
+    const geo = await capturarGeolocalizacao();
+    if (geo && idx !== -1) {
+      contratos[idx].latExec = geo.lat;
+      contratos[idx].lngExec = geo.lng;
     }
 
-    const geo = await geoPromise;
-
+    // 1. Escrita crítica no GAS — sem esperar pelo upload de foto
     const campos = {
       ...camposBase,
       [COL_OBS_EXEC]: obsExec,
       [COL_DATA_EXEC]: dataExec,
       [COL_TECNICO]: tecnico,
-      [COL_FOTO]: fotoExec,
       [COL_BAIXA_SITE]: "Sim",
       [COL_VISITAS]: novasVisitas,
       ...(geo ? { [COL_LAT_EXEC]: geo.lat, [COL_LNG_EXEC]: geo.lng } : {}),
     };
-
     await salvarNaPlanilha(contratoParaSalvar, campos);
-
-    // Atualiza com valores reais (foto URL e GPS) após confirmação do servidor
-    if (idx !== -1) {
-      if (fotoExec) contratos[idx].fotoExec = fotoExec;
-      if (geo) {
-        contratos[idx].latExec = geo.lat;
-        contratos[idx].lngExec = geo.lng;
-      }
-    }
-    salvarContratosIDB(contratos, tecnicoLogado()?.usuario);
+    salvarContratosIDB(contratos, usuarioAtual);
     agendarNotificacoesHoje();
     mostrarToast("Baixa registrada com sucesso.", "sucesso");
-    if (erroFoto) {
-      const motivo = erroFoto.message || "erro de memória ou conexão instável";
-      setTimeout(() => {
-        mostrarToast(
-          `Evidências não enviadas: ${motivo}. A baixa foi registrada normalmente, mas sem as fotos.`,
-          "aviso",
-        );
-      }, 3800);
+
+    // 2. Upload de foto em background verdadeiro — não trava a UI nem o loading bar
+    if (
+      CLOUDINARY_CLOUD_NAME !== "SEU_CLOUD_NAME" &&
+      fotosParaUpload.length &&
+      navigator.onLine
+    ) {
+      uploadTodasFotos(fotosParaUpload)
+        .then(async (fotoExec) => {
+          if (!fotoExec) return;
+          await salvarNaPlanilha(contratoParaSalvar, { [COL_FOTO]: fotoExec });
+          if (idx !== -1) contratos[idx].fotoExec = fotoExec;
+          salvarContratosIDB(contratos, usuarioAtual);
+        })
+        .catch((e) => {
+          const motivo = e?.message || "erro de conexão";
+          mostrarToast(
+            `Fotos não enviadas: ${motivo}. A baixa foi registrada normalmente.`,
+            "aviso",
+          );
+        });
     }
   } catch (erro) {
     if (erro instanceof OfflineError) {
@@ -2527,6 +2522,7 @@ async function executarSalvamento(camposBase, novoStatus) {
       // Rollback: reverte contrato ao estado original
       if (idx !== -1 && contratoOriginal) contratos[idx] = contratoOriginal;
       aplicarFiltros();
+      salvarContratosIDB(contratos, usuarioAtual); // reverte IDB também
       mostrarToast(
         "Erro ao salvar. Verifique sua conexão e tente novamente.",
         "erro",
