@@ -4,7 +4,7 @@
 // URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
 // Ver instruções em gas/Codigo.gs
 const GAS_URL =
-  "https://script.google.com/macros/s/AKfycbzrbetyfU6a4DK1AOAac2puIxHDlyL2C6gFRXGa9eiwB53Jij0UMyYAScFyPsYBRsfU/exec";
+  "https://script.google.com/macros/s/AKfycbwvgLR9qWWaeogxhlEZFzcOp5MYsFZ4t9KF2cfwqYWrN3TEspa7GRvSjhtRH9LuHCRp/exec";
 
 // Cloudinary — upload de fotos (plano gratuito: 25GB storage)
 // Como configurar: ver instruções abaixo de CLOUDINARY_UPLOAD_PRESET
@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "2.2";
+const APP_VERSION = "2.3";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -3146,6 +3146,7 @@ function getContratosAdminSemPeriodo() {
 }
 
 function renderizarAdmin() {
+  _destruirGraficos(); // limpa instâncias Chart.js ao trocar de aba
   const lista = getContratosAdmin();
   const conteudo = document.getElementById("admin-conteudo");
   if (adminTabAtiva === "metricas")
@@ -3154,7 +3155,13 @@ function renderizarAdmin() {
     conteudo.innerHTML = renderizarHistoricoHTML(lista);
   else if (adminTabAtiva === "relatorio")
     conteudo.innerHTML = renderizarRelatorioHTML();
-  else if (adminTabAtiva === "tecnicos") {
+  else if (adminTabAtiva === "projecao") {
+    const dados = _calcularDadosProjecao(getContratosAdminSemPeriodo());
+    conteudo.innerHTML = renderizarProjecaoHTML(dados);
+    renderIcons();
+    requestAnimationFrame(() => _initGraficos(dados));
+    return;
+  } else if (adminTabAtiva === "tecnicos") {
     conteudo.innerHTML = `<div class="estado-vazio presenca-carregando"><p><i data-lucide="loader" class="icon icon-sm"></i> Carregando presenças...</p></div>`;
     renderIcons();
     carregarPresenca().then((dados) => {
@@ -3929,6 +3936,415 @@ function baixarCSVicg() {
   a.download = `icg-${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// =========================================
+// PAINEL DE PROJEÇÃO
+// =========================================
+let _chartInstances = {};
+
+function _destruirGraficos() {
+  Object.values(_chartInstances).forEach((ch) => ch?.destroy());
+  _chartInstances = {};
+}
+
+function _calcularDadosProjecao(lista) {
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const ano = hoje.getFullYear();
+  const mes = hoje.getMonth();
+  const diaHoje = hoje.getDate();
+  const diasNoMes = new Date(ano, mes + 1, 0).getDate();
+
+  // Status geral
+  const statusCount = { Pendente: 0, Retirado: 0, Parcial: 0, Quebra: 0 };
+  lista.forEach((c) => {
+    statusCount[c.status] = (statusCount[c.status] || 0) + 1;
+  });
+
+  // Executados neste mês (por data de execução)
+  const execMes = lista.filter((c) => {
+    if (!["Retirado", "Parcial", "Quebra"].includes(c.status)) return false;
+    const ts = parseDateBR(c.dataExec);
+    if (!ts) return false;
+    const d = new Date(ts);
+    return d.getFullYear() === ano && d.getMonth() === mes;
+  });
+
+  // Contagem por dia do mês
+  const porDia = {};
+  execMes.forEach((c) => {
+    const ts = parseDateBR(c.dataExec);
+    if (!ts) return;
+    const dia = new Date(ts).getDate();
+    porDia[dia] = (porDia[dia] || 0) + 1;
+  });
+
+  // Linha de progresso real + projeção para cada dia do mês
+  const labelsLinha = [];
+  const dadosReais = [];
+  const dadosProj = [];
+  let acum = 0;
+  const taxaDiaria = diaHoje > 0 ? execMes.length / diaHoje : 0;
+  for (let d = 1; d <= diasNoMes; d++) {
+    labelsLinha.push(String(d));
+    if (d <= diaHoje) {
+      acum += porDia[d] || 0;
+      dadosReais.push(acum);
+      dadosProj.push(d === diaHoje ? acum : null); // ponte no dia atual
+    } else {
+      dadosReais.push(null);
+      dadosProj.push(Math.round(execMes.length + taxaDiaria * (d - diaHoje)));
+    }
+  }
+
+  // Semana atual (Seg → Dom)
+  const DIAS_PT = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  const diaSemana = hoje.getDay();
+  const seg = new Date(hoje);
+  seg.setDate(hoje.getDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
+
+  const semanaLabels = [];
+  const semanaRet = [];
+  const semanaParc = [];
+  const semanaQbr = [];
+  for (let i = 0; i < 7; i++) {
+    const dia = new Date(seg);
+    dia.setDate(seg.getDate() + i);
+    const isHoje = dia.toDateString() === hoje.toDateString();
+    semanaLabels.push((isHoje ? "▶ " : "") + DIAS_PT[dia.getDay()]);
+
+    const ini = dia.getTime();
+    const fim = ini + 86399999;
+    let ret = 0, par = 0, qbr = 0;
+    lista.forEach((c) => {
+      const ts = parseDateBR(c.dataExec);
+      if (!ts || ts < ini || ts > fim) return;
+      if (c.status === "Retirado") ret++;
+      else if (c.status === "Parcial") par++;
+      else if (c.status === "Quebra") qbr++;
+    });
+    semanaRet.push(ret);
+    semanaParc.push(par);
+    semanaQbr.push(qbr);
+  }
+
+  // Ranking de técnicos (mês atual)
+  const rankMap = {};
+  execMes.forEach((c) => {
+    const tec = c.tecnicoExec?.trim() || "—";
+    rankMap[tec] = (rankMap[tec] || 0) + 1;
+  });
+  const ranking = Object.entries(rankMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+
+  const projetadoFimMes = Math.round(execMes.length + taxaDiaria * (diasNoMes - diaHoje));
+  const base = statusCount.Pendente + execMes.length;
+  const pct = base > 0 ? Math.round((execMes.length / base) * 100) : 0;
+
+  return {
+    statusCount,
+    execMes: execMes.length,
+    taxaDiaria: taxaDiaria.toFixed(1),
+    projetadoFimMes,
+    diasNoMes,
+    diaHoje,
+    pct,
+    labelsLinha,
+    dadosReais,
+    dadosProj,
+    semanaLabels,
+    semanaRet,
+    semanaParc,
+    semanaQbr,
+    ranking,
+  };
+}
+
+function renderizarProjecaoHTML(d) {
+  const mesNome = new Date().toLocaleDateString("pt-BR", {
+    month: "long",
+    year: "numeric",
+  });
+  return `
+    <div class="proj-wrapper">
+      <div class="proj-header-row">
+        <span class="proj-titulo">Projeção — ${mesNome}</span>
+        <button class="btn-export-pdf" onclick="gerarPDFProjecao()">
+          <i data-lucide="file-down" class="icon icon-sm"></i> Exportar PDF
+        </button>
+      </div>
+
+      <div class="proj-cards">
+        <div class="proj-card proj-azul">
+          <div class="proj-card-valor">${d.execMes}</div>
+          <div class="proj-card-label">Executados no mês</div>
+        </div>
+        <div class="proj-card proj-verde">
+          <div class="proj-card-valor">${d.taxaDiaria}/dia</div>
+          <div class="proj-card-label">Taxa média</div>
+        </div>
+        <div class="proj-card proj-laranja">
+          <div class="proj-card-valor">~${d.projetadoFimMes}</div>
+          <div class="proj-card-label">Projeção fim do mês</div>
+        </div>
+        <div class="proj-card proj-cinza">
+          <div class="proj-card-valor">${d.statusCount.Pendente}</div>
+          <div class="proj-card-label">Pendentes</div>
+        </div>
+      </div>
+
+      <div class="proj-progresso-wrap">
+        <div class="proj-progresso-label">
+          Progresso do mês: <strong>${d.pct}%</strong>
+          <span class="proj-progresso-sub">(dia ${d.diaHoje} de ${d.diasNoMes})</span>
+        </div>
+        <div class="proj-progresso-bg">
+          <div class="proj-progresso-fill" style="width:${Math.min(d.pct, 100)}%"></div>
+        </div>
+      </div>
+
+      <div id="projecao-charts" class="proj-charts-grid">
+        <div class="proj-chart-card proj-span2">
+          <div class="proj-chart-titulo">Progresso do mês + Projeção</div>
+          <canvas id="chart-mes"></canvas>
+        </div>
+        <div class="proj-chart-card">
+          <div class="proj-chart-titulo">Execuções esta semana</div>
+          <canvas id="chart-semana"></canvas>
+        </div>
+        <div class="proj-chart-card">
+          <div class="proj-chart-titulo">Status atual</div>
+          <canvas id="chart-status"></canvas>
+        </div>
+        <div class="proj-chart-card proj-span2">
+          <div class="proj-chart-titulo">Ranking de técnicos (mês)</div>
+          <canvas id="chart-tecnico"></canvas>
+        </div>
+      </div>
+
+      ${!window.Chart ? `<p class="proj-sem-chart">⚠️ Gráficos indisponíveis offline. Conecte-se para carregá-los.</p>` : ""}
+    </div>`;
+}
+
+function _initGraficos(d) {
+  if (!window.Chart) return;
+  _destruirGraficos();
+
+  // ---- Linha: progresso do mês ----
+  const ctxMes = document.getElementById("chart-mes");
+  if (ctxMes) {
+    _chartInstances.mes = new Chart(ctxMes, {
+      type: "line",
+      data: {
+        labels: d.labelsLinha,
+        datasets: [
+          {
+            label: "Executados",
+            data: d.dadosReais,
+            borderColor: "#2563eb",
+            backgroundColor: "rgba(37,99,235,0.07)",
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            spanGaps: false,
+          },
+          {
+            label: "Projeção",
+            data: d.dadosProj,
+            borderColor: "#93c5fd",
+            borderDash: [6, 4],
+            fill: false,
+            tension: 0.2,
+            pointRadius: 0,
+            spanGaps: false,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: "top", labels: { font: { size: 11 } } } },
+        scales: {
+          y: { beginAtZero: true, ticks: { font: { size: 10 } } },
+          x: { ticks: { font: { size: 10 }, maxRotation: 0, maxTicksLimit: 15 } },
+        },
+      },
+    });
+  }
+
+  // ---- Barras empilhadas: semana ----
+  const ctxSem = document.getElementById("chart-semana");
+  if (ctxSem) {
+    _chartInstances.semana = new Chart(ctxSem, {
+      type: "bar",
+      data: {
+        labels: d.semanaLabels,
+        datasets: [
+          { label: "Retirado", data: d.semanaRet, backgroundColor: "#16a34a" },
+          { label: "Parcial",  data: d.semanaParc, backgroundColor: "#f59e0b" },
+          { label: "Quebra",   data: d.semanaQbr,  backgroundColor: "#dc2626" },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: "top", labels: { font: { size: 11 } } } },
+        scales: {
+          x: { stacked: true, ticks: { font: { size: 11 } } },
+          y: { stacked: true, beginAtZero: true, ticks: { font: { size: 10 } } },
+        },
+      },
+    });
+  }
+
+  // ---- Donut: status ----
+  const ctxStat = document.getElementById("chart-status");
+  if (ctxStat) {
+    const tot = Object.values(d.statusCount).reduce((a, b) => a + b, 0);
+    _chartInstances.status = new Chart(ctxStat, {
+      type: "doughnut",
+      data: {
+        labels: ["Pendente", "Retirado", "Parcial", "Quebra"],
+        datasets: [{
+          data: [d.statusCount.Pendente, d.statusCount.Retirado, d.statusCount.Parcial, d.statusCount.Quebra],
+          backgroundColor: ["#6b7280", "#16a34a", "#f59e0b", "#dc2626"],
+          borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: "bottom", labels: { font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const pct = tot > 0 ? ((ctx.raw / tot) * 100).toFixed(1) : 0;
+                return `${ctx.label}: ${ctx.raw} (${pct}%)`;
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  // ---- Barras horizontais: ranking técnicos ----
+  const ctxTec = document.getElementById("chart-tecnico");
+  if (ctxTec && d.ranking.length) {
+    const CORES_PÓDIO = ["#f59e0b", "#9ca3af", "#b45309"];
+    _chartInstances.tecnico = new Chart(ctxTec, {
+      type: "bar",
+      data: {
+        labels: d.ranking.map(([nome]) => nome),
+        datasets: [{
+          label: "Executados no mês",
+          data: d.ranking.map(([, n]) => n),
+          backgroundColor: d.ranking.map((_, i) => CORES_PÓDIO[i] ?? "#3b82f6"),
+        }],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, ticks: { font: { size: 10 } } },
+          y: { ticks: { font: { size: 11 } } },
+        },
+      },
+    });
+  }
+}
+
+function _loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function gerarPDFProjecao() {
+  const btn = document.querySelector(".btn-export-pdf");
+  const originalHTML = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i data-lucide="loader" class="icon icon-sm"></i> Gerando...`;
+    renderIcons();
+  }
+  try {
+    await _loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+    await _loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js");
+
+    const { jsPDF } = window.jspdf;
+    const chartsEl = document.getElementById("projecao-charts");
+    const captura = await html2canvas(chartsEl, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      logging: false,
+    });
+    const imgData = captura.toDataURL("image/png");
+    const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const hoje = new Date().toLocaleDateString("pt-BR");
+    const mesNome = new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+
+    // Cabeçalho azul
+    pdf.setFillColor(0, 86, 179);
+    pdf.rect(0, 0, pageW, 14, "F");
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFontSize(13);
+    pdf.setFont(undefined, "bold");
+    pdf.text("Backlog Safra — Relatório de Projeção", 10, 9);
+    pdf.setFont(undefined, "normal");
+    pdf.setFontSize(9);
+    pdf.text(`${mesNome}  ·  Gerado em ${hoje}`, pageW - 10, 9, { align: "right" });
+
+    // Cards de resumo
+    const dados = _calcularDadosProjecao(getContratosAdminSemPeriodo());
+    const cards = [
+      { label: "Executados no mês", valor: String(dados.execMes) },
+      { label: "Taxa média", valor: `${dados.taxaDiaria}/dia` },
+      { label: "Projeção fim do mês", valor: `~${dados.projetadoFimMes}` },
+      { label: "Pendentes", valor: String(dados.statusCount.Pendente) },
+    ];
+    const cw = (pageW - 20) / 4;
+    pdf.setTextColor(30, 30, 30);
+    cards.forEach((c, i) => {
+      const x = 10 + i * cw;
+      pdf.setFillColor(235, 244, 255);
+      pdf.roundedRect(x, 16, cw - 2, 12, 2, 2, "F");
+      pdf.setFontSize(14);
+      pdf.setFont(undefined, "bold");
+      pdf.setTextColor(0, 86, 179);
+      pdf.text(c.valor, x + (cw - 2) / 2, 21, { align: "center" });
+      pdf.setFontSize(7);
+      pdf.setFont(undefined, "normal");
+      pdf.setTextColor(80, 80, 80);
+      pdf.text(c.label, x + (cw - 2) / 2, 25, { align: "center" });
+    });
+
+    // Imagem dos gráficos
+    const imgW = pageW - 20;
+    const imgH = Math.min((captura.height * imgW) / captura.width, pageH - 32);
+    pdf.addImage(imgData, "PNG", 10, 30, imgW, imgH);
+
+    pdf.save(`projecao-safra-${hoje.replace(/\//g, "-")}.pdf`);
+    mostrarToast("PDF exportado com sucesso!", "sucesso");
+  } catch (err) {
+    console.error(err);
+    mostrarToast("Erro ao gerar PDF. Verifique sua conexão.", "erro");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHTML;
+      renderIcons();
+    }
+  }
 }
 
 // =========================================
