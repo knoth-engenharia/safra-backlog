@@ -2878,3 +2878,101 @@ body {
   font-size: 0.82rem;
   margin-top: 16px;
 }
+
+.proj-legenda-proj {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: #93c5fd;
+  margin-left: 6px;
+}
+
+.proj-header-acoes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.proj-filtro-escopo {
+  font-size: 0.8rem;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+}
+.proj-nota-calculo {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 0.74rem;
+  color: #9ca3af;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+/* ---- Meta do dia (histórico pessoal) ---- */
+.mh-meta-titulo {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #374151;
+  margin-bottom: 8px;
+}
+.mh-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.mh-meta-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 10px 8px;
+}
+.mh-meta-card.mh-meta-ok {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+.mh-meta-cidade {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mh-meta-numeros {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  margin-bottom: 5px;
+}
+.mh-meta-feitos {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #1e40af;
+}
+.mh-meta-sep { font-size: 0.9rem; color: #94a3b8; }
+.mh-meta-alvo { font-size: 0.78rem; color: #64748b; }
+.mh-meta-barra-bg {
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.mh-meta-barra-fill {
+  height: 100%;
+  background: #3b82f6;
+  border-radius: 99px;
+  transition: width 0.4s ease;
+}
+.mh-meta-barra-fill.mh-meta-barra-ok { background: #16a34a; }
+.mh-meta-sub {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}

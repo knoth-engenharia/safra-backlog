@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "2.3";
+const APP_VERSION = "2.5";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -3071,7 +3071,45 @@ function renderizarHistoricoPessoal() {
     })
     .join("");
 
+  // Meta do dia por cidade
+  const { cidades: cidadesTec } = tecnicoLogado() || {};
+  let metaHTML = "";
+  if (cidadesTec?.length) {
+    const agora = new Date();
+    const inicioHoje = new Date(agora); inicioHoje.setHours(0, 0, 0, 0);
+    const fimHoje = new Date(agora); fimHoje.setHours(23, 59, 59, 999);
+    const diasNoMes = new Date(agora.getFullYear(), agora.getMonth() + 1, 0).getDate();
+
+    const cards = cidadesTec.map((cidade) => {
+      const cidadeLow = cidade.toLowerCase();
+      const totalCidade = contratos.filter((c) => c.cidade.toLowerCase() === cidadeLow).length;
+      const meta = totalCidade > 0 ? Math.max(1, Math.round(totalCidade / diasNoMes)) : 0;
+      const feitosHoje = contratos.filter((c) => {
+        if (c.cidade.toLowerCase() !== cidadeLow) return false;
+        if (c.tecnicoExec?.trim().toLowerCase() !== usuarioLow) return false;
+        const ts = parseDateBR(c.dataExec);
+        return ts && ts >= inicioHoje.getTime() && ts <= fimHoje.getTime();
+      }).length;
+      const pct = meta > 0 ? Math.min(100, Math.round((feitosHoje / meta) * 100)) : 0;
+      const ok = feitosHoje >= meta;
+      return `<div class="mh-meta-card${ok ? " mh-meta-ok" : ""}">
+        <div class="mh-meta-cidade">${escHtml(cidade)}</div>
+        <div class="mh-meta-numeros">
+          <span class="mh-meta-feitos">${feitosHoje}</span>
+          <span class="mh-meta-sep">/</span>
+          <span class="mh-meta-alvo">${meta} hoje</span>
+        </div>
+        <div class="mh-meta-barra-bg">
+          <div class="mh-meta-barra-fill${ok ? " mh-meta-barra-ok" : ""}" style="width:${pct}%"></div>
+        </div>
+        <div class="mh-meta-sub">${totalCidade} contratos · ${diasNoMes} dias no mês</div>
+      </div>`;
+    }).join("");
+    metaHTML = `<div class="mh-meta-titulo"><i data-lucide="target" class="icon icon-xs"></i> Meta do dia</div><div class="mh-meta-grid">${cards}</div>`;
+  }
+
   conteudo.innerHTML = `
+    ${metaHTML}
     <div class="mh-resumo">
       <span class="hist-dia-chip chip-ret">Retirados: <strong>${totRet}</strong></span>
       <span class="hist-dia-chip chip-par">Parciais: <strong>${totPar}</strong></span>
@@ -3156,7 +3194,7 @@ function renderizarAdmin() {
   else if (adminTabAtiva === "relatorio")
     conteudo.innerHTML = renderizarRelatorioHTML();
   else if (adminTabAtiva === "projecao") {
-    const dados = _calcularDadosProjecao(getContratosAdminSemPeriodo());
+    const dados = _calcularDadosProjecao(getContratosAdminSemPeriodo(), _filtroProjecao);
     conteudo.innerHTML = renderizarProjecaoHTML(dados);
     renderIcons();
     requestAnimationFrame(() => _initGraficos(dados));
@@ -3942,13 +3980,19 @@ function baixarCSVicg() {
 // PAINEL DE PROJEÇÃO
 // =========================================
 let _chartInstances = {};
+let _filtroProjecao = "total"; // "total" | "ret"  (ret = só Retirado+Parcial, sem Quebra)
 
 function _destruirGraficos() {
   Object.values(_chartInstances).forEach((ch) => ch?.destroy());
   _chartInstances = {};
 }
 
-function _calcularDadosProjecao(lista) {
+function _calcularDadosProjecao(lista, filtro) {
+  filtro = filtro || "total";
+  const filtroStatuses = filtro === "ret"
+    ? ["Retirado", "Parcial"]
+    : ["Retirado", "Parcial", "Quebra"];
+
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
   const ano = hoje.getFullYear();
@@ -3956,15 +4000,57 @@ function _calcularDadosProjecao(lista) {
   const diaHoje = hoje.getDate();
   const diasNoMes = new Date(ano, mes + 1, 0).getDate();
 
-  // Status geral
+  // Status geral (sem filtro de escopo — panorama real)
   const statusCount = { Pendente: 0, Retirado: 0, Parcial: 0, Quebra: 0 };
   lista.forEach((c) => {
     statusCount[c.status] = (statusCount[c.status] || 0) + 1;
   });
 
-  // Executados neste mês (por data de execução)
+  // Helper: conta via-app dentro de um intervalo de timestamps
+  const contarViaApp = (ini, fim) =>
+    lista.filter((c) => {
+      if (c.baixaSite !== "Sim") return false;
+      if (!filtroStatuses.includes(c.status)) return false;
+      const ts = parseDateBR(c.dataExec);
+      return ts && ts >= ini && ts <= fim;
+    }).length;
+
+  // Segunda-feira da semana atual
+  const diaSemana = hoje.getDay();
+  const seg = new Date(hoje);
+  seg.setDate(hoje.getDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
+  seg.setHours(0, 0, 0, 0);
+
+  // Rolling average: últimas 3 semanas completas + semana atual extrapolada
+  // Isso evita distorção em dias 1 do mês com poucos dados
+  const taxasSemanais = [];
+  for (let offset = -3; offset <= -1; offset++) {
+    const iniSem = new Date(seg);
+    iniSem.setDate(seg.getDate() + offset * 7);
+    iniSem.setHours(0, 0, 0, 0);
+    const fimSem = new Date(iniSem);
+    fimSem.setDate(iniSem.getDate() + 6);
+    fimSem.setHours(23, 59, 59, 999);
+    taxasSemanais.push(contarViaApp(iniSem.getTime(), fimSem.getTime()));
+  }
+  // Semana atual: extrapola para 7 dias com base nos dias já passados
+  const diasPassadosSemana = diaSemana === 0 ? 7 : diaSemana;
+  const contSemAtual = contarViaApp(seg.getTime(), seg.getTime() + 7 * 86400000 - 1);
+  const semAtualExtrap = diasPassadosSemana > 0
+    ? Math.round((contSemAtual / diasPassadosSemana) * 7)
+    : 0;
+  taxasSemanais.push(semAtualExtrap);
+
+  const temHistorico = taxasSemanais.some((v) => v > 0);
+  const taxaSemanalRolling = temHistorico
+    ? taxasSemanais.reduce((a, b) => a + b, 0) / taxasSemanais.length
+    : 0;
+  const taxaDiaria = taxaSemanalRolling / 7;
+
+  // Executados neste mês VIA APP
   const execMes = lista.filter((c) => {
-    if (!["Retirado", "Parcial", "Quebra"].includes(c.status)) return false;
+    if (!filtroStatuses.includes(c.status)) return false;
+    if (c.baixaSite !== "Sim") return false;
     const ts = parseDateBR(c.dataExec);
     if (!ts) return false;
     const d = new Date(ts);
@@ -3980,30 +4066,25 @@ function _calcularDadosProjecao(lista) {
     porDia[dia] = (porDia[dia] || 0) + 1;
   });
 
-  // Linha de progresso real + projeção para cada dia do mês
+  // Linha de progresso real + projeção
   const labelsLinha = [];
   const dadosReais = [];
   const dadosProj = [];
   let acum = 0;
-  const taxaDiaria = diaHoje > 0 ? execMes.length / diaHoje : 0;
   for (let d = 1; d <= diasNoMes; d++) {
     labelsLinha.push(String(d));
     if (d <= diaHoje) {
       acum += porDia[d] || 0;
       dadosReais.push(acum);
-      dadosProj.push(d === diaHoje ? acum : null); // ponte no dia atual
+      dadosProj.push(d === diaHoje ? acum : null);
     } else {
       dadosReais.push(null);
       dadosProj.push(Math.round(execMes.length + taxaDiaria * (d - diaHoje)));
     }
   }
 
-  // Semana atual (Seg → Dom)
+  // Semana atual (Seg → Dom) — barras empilhadas por status
   const DIAS_PT = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-  const diaSemana = hoje.getDay();
-  const seg = new Date(hoje);
-  seg.setDate(hoje.getDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
-
   const semanaLabels = [];
   const semanaRet = [];
   const semanaParc = [];
@@ -4013,31 +4094,54 @@ function _calcularDadosProjecao(lista) {
     dia.setDate(seg.getDate() + i);
     const isHoje = dia.toDateString() === hoje.toDateString();
     semanaLabels.push((isHoje ? "▶ " : "") + DIAS_PT[dia.getDay()]);
-
     const ini = dia.getTime();
     const fim = ini + 86399999;
     let ret = 0, par = 0, qbr = 0;
     lista.forEach((c) => {
+      if (c.baixaSite !== "Sim") return;
       const ts = parseDateBR(c.dataExec);
       if (!ts || ts < ini || ts > fim) return;
       if (c.status === "Retirado") ret++;
       else if (c.status === "Parcial") par++;
-      else if (c.status === "Quebra") qbr++;
+      else if (c.status === "Quebra" && filtro === "total") qbr++;
     });
     semanaRet.push(ret);
     semanaParc.push(par);
     semanaQbr.push(qbr);
   }
 
-  // Ranking de técnicos (mês atual)
+  // Evolução semanal: 3 antes + atual + 3 projetadas
+  // Projeção = rolling average (não apenas taxa atual)
+  const evolLabels = [];
+  const evolVals = [];
+  const evolFutura = [];
+  const evolAtual = [];
+  for (let offset = -3; offset <= 3; offset++) {
+    const iniSem = new Date(seg);
+    iniSem.setDate(seg.getDate() + offset * 7);
+    iniSem.setHours(0, 0, 0, 0);
+    const fimSem = new Date(iniSem);
+    fimSem.setDate(iniSem.getDate() + 6);
+    fimSem.setHours(23, 59, 59, 999);
+    const label = iniSem.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+    evolLabels.push(label + (offset > 0 ? " ★" : ""));
+    evolAtual.push(offset === 0);
+    if (offset > 0) {
+      evolVals.push(Math.round(taxaSemanalRolling)); // usa rolling, não taxa do dia atual
+      evolFutura.push(true);
+    } else {
+      evolVals.push(contarViaApp(iniSem.getTime(), fimSem.getTime()));
+      evolFutura.push(false);
+    }
+  }
+
+  // Ranking de técnicos (mês atual, via app, conforme filtro)
   const rankMap = {};
   execMes.forEach((c) => {
     const tec = c.tecnicoExec?.trim() || "—";
     rankMap[tec] = (rankMap[tec] || 0) + 1;
   });
-  const ranking = Object.entries(rankMap)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8);
+  const ranking = Object.entries(rankMap).sort((a, b) => b[1] - a[1]).slice(0, 8);
 
   const projetadoFimMes = Math.round(execMes.length + taxaDiaria * (diasNoMes - diaHoje));
   const base = statusCount.Pendente + execMes.length;
@@ -4047,6 +4151,7 @@ function _calcularDadosProjecao(lista) {
     statusCount,
     execMes: execMes.length,
     taxaDiaria: taxaDiaria.toFixed(1),
+    taxaSemanalRolling: taxaSemanalRolling.toFixed(1),
     projetadoFimMes,
     diasNoMes,
     diaHoje,
@@ -4058,7 +4163,12 @@ function _calcularDadosProjecao(lista) {
     semanaRet,
     semanaParc,
     semanaQbr,
+    evolLabels,
+    evolVals,
+    evolFutura,
+    evolAtual,
     ranking,
+    filtro,
   };
 }
 
@@ -4071,19 +4181,25 @@ function renderizarProjecaoHTML(d) {
     <div class="proj-wrapper">
       <div class="proj-header-row">
         <span class="proj-titulo">Projeção — ${mesNome}</span>
-        <button class="btn-export-pdf" onclick="gerarPDFProjecao()">
-          <i data-lucide="file-down" class="icon icon-sm"></i> Exportar PDF
-        </button>
+        <div class="proj-header-acoes">
+          <select class="input-select-sm proj-filtro-escopo" onchange="mudarFiltroProjecao(this.value)">
+            <option value="total" ${d.filtro === "total" ? "selected" : ""}>Total (incl. Quebras)</option>
+            <option value="ret"   ${d.filtro === "ret"   ? "selected" : ""}>Apenas Retiradas</option>
+          </select>
+          <button class="btn-export-pdf" onclick="gerarPDFProjecao()">
+            <i data-lucide="file-down" class="icon icon-sm"></i> Exportar PDF
+          </button>
+        </div>
       </div>
 
       <div class="proj-cards">
         <div class="proj-card proj-azul">
           <div class="proj-card-valor">${d.execMes}</div>
-          <div class="proj-card-label">Executados no mês</div>
+          <div class="proj-card-label">Via app este mês${d.filtro === "ret" ? " (só ret.)" : ""}</div>
         </div>
         <div class="proj-card proj-verde">
           <div class="proj-card-valor">${d.taxaDiaria}/dia</div>
-          <div class="proj-card-label">Taxa média</div>
+          <div class="proj-card-label">Taxa (~${d.taxaSemanalRolling}/sem)</div>
         </div>
         <div class="proj-card proj-laranja">
           <div class="proj-card-valor">~${d.projetadoFimMes}</div>
@@ -4093,6 +4209,11 @@ function renderizarProjecaoHTML(d) {
           <div class="proj-card-valor">${d.statusCount.Pendente}</div>
           <div class="proj-card-label">Pendentes</div>
         </div>
+      </div>
+
+      <div class="proj-nota-calculo">
+        <i data-lucide="info" class="icon icon-xs"></i>
+        Taxa calculada pela média das últimas 3 semanas completas + semana atual extrapolada — evita distorção em dias 1 do mês.
       </div>
 
       <div class="proj-progresso-wrap">
@@ -4119,7 +4240,11 @@ function renderizarProjecaoHTML(d) {
           <canvas id="chart-status"></canvas>
         </div>
         <div class="proj-chart-card proj-span2">
-          <div class="proj-chart-titulo">Ranking de técnicos (mês)</div>
+          <div class="proj-chart-titulo">Evolução semanal via app — 3 semanas antes · atual · 3 projetadas <span class="proj-legenda-proj">★ = projeção</span></div>
+          <canvas id="chart-semanal-evol"></canvas>
+        </div>
+        <div class="proj-chart-card proj-span2">
+          <div class="proj-chart-titulo">Ranking de técnicos (mês — via app)</div>
           <canvas id="chart-tecnico"></canvas>
         </div>
       </div>
@@ -4228,6 +4353,54 @@ function _initGraficos(d) {
     });
   }
 
+  // ---- Barras: evolução semanal (3 antes + atual + 3 projetadas) ----
+  const ctxEvol = document.getElementById("chart-semanal-evol");
+  if (ctxEvol) {
+    const coresEvol = d.evolVals.map((_, i) => {
+      if (d.evolFutura[i]) return "rgba(37,99,235,0.28)"; // projetado
+      if (d.evolAtual[i]) return "#1d4ed8";               // semana atual
+      return "#2563eb";                                    // semanas passadas
+    });
+    _chartInstances.evolSemanal = new Chart(ctxEvol, {
+      type: "bar",
+      data: {
+        labels: d.evolLabels,
+        datasets: [
+          {
+            label: "Via app (real)",
+            data: d.evolVals.map((v, i) => (!d.evolFutura[i] ? v : null)),
+            backgroundColor: d.evolVals.map((_, i) => d.evolAtual[i] ? "#1d4ed8" : "#2563eb"),
+          },
+          {
+            label: "Projeção",
+            data: d.evolVals.map((v, i) => (d.evolFutura[i] ? v : null)),
+            backgroundColor: "rgba(37,99,235,0.28)",
+            borderColor: "#93c5fd",
+            borderWidth: 1.5,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: "top", labels: { font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const i = items[0].dataIndex;
+                return d.evolFutura[i] ? `Semana de ${d.evolLabels[i].replace(" ★", "")} (projeção)` : `Semana de ${d.evolLabels[i]}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { font: { size: 11 } } },
+          y: { beginAtZero: true, ticks: { font: { size: 10 } } },
+        },
+      },
+    });
+  }
+
   // ---- Barras horizontais: ranking técnicos ----
   const ctxTec = document.getElementById("chart-tecnico");
   if (ctxTec && d.ranking.length) {
@@ -4253,6 +4426,11 @@ function _initGraficos(d) {
       },
     });
   }
+}
+
+function mudarFiltroProjecao(v) {
+  _filtroProjecao = v;
+  renderizarAdmin();
 }
 
 function _loadScript(src) {
@@ -4305,7 +4483,7 @@ async function gerarPDFProjecao() {
     pdf.text(`${mesNome}  ·  Gerado em ${hoje}`, pageW - 10, 9, { align: "right" });
 
     // Cards de resumo
-    const dados = _calcularDadosProjecao(getContratosAdminSemPeriodo());
+    const dados = _calcularDadosProjecao(getContratosAdminSemPeriodo(), _filtroProjecao);
     const cards = [
       { label: "Executados no mês", valor: String(dados.execMes) },
       { label: "Taxa média", valor: `${dados.taxaDiaria}/dia` },
