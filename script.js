@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "2.5";
+const APP_VERSION = "2.6";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -607,6 +607,11 @@ function toggleAgrupamento() {
 
 function alterarSortRua(valor) {
   sortRua = valor;
+  aplicarFiltros();
+}
+
+function alterarSortQntd(valor) {
+  sortQntd = valor;
   aplicarFiltros();
 }
 
@@ -1241,6 +1246,7 @@ let rotaSelecionados = new Set(); // Set de contrato.id
 // Agrupamento
 let modoAgrupamento = ""; // "" | "rua"
 let sortRua = "az"; // "az" | "mais" | "menos"
+let sortQntd = ""; // "" | "mais" | "menos"
 
 // Admin histórico sub-view
 let histSubView = "lista"; // "lista" | "dia"
@@ -1475,6 +1481,7 @@ function salvarFiltros() {
     tecnico: document.getElementById("filter-tecnico").value,
     periodo: document.getElementById("filter-periodo")?.value || "",
     distancia: document.getElementById("filter-distancia")?.value || "",
+    sortQntd: document.getElementById("sort-qntd")?.value || "",
   };
   localStorage.setItem(FILTROS_KEY, JSON.stringify(f));
 }
@@ -1531,6 +1538,13 @@ function preencherFiltros() {
     const elDist = document.getElementById("filter-distancia");
     if (elDist) elDist.value = saved.distancia;
   }
+  if (saved.sortQntd) {
+    const elSq = document.getElementById("sort-qntd");
+    if (elSq) {
+      elSq.value = saved.sortQntd;
+      sortQntd = saved.sortQntd;
+    }
+  }
 
   aplicarFiltros();
 }
@@ -1568,6 +1582,9 @@ function limparFiltros() {
   if (elPer) elPer.value = "";
   const elDist = document.getElementById("filter-distancia");
   if (elDist) elDist.value = "";
+  const elSq = document.getElementById("sort-qntd");
+  if (elSq) elSq.value = "";
+  sortQntd = "";
   // Reseta agrupamento por rua
   if (modoAgrupamento === "rua") {
     modoAgrupamento = "";
@@ -1613,6 +1630,7 @@ function atualizarBadgeFiltros() {
     "filter-tecnico",
     "filter-periodo",
     "filter-distancia",
+    "sort-qntd",
   ];
   let count = ids.filter((id) => document.getElementById(id)?.value).length;
   if (userLocation) count++;
@@ -1650,7 +1668,8 @@ function aplicarFiltros() {
       c.nome.toLowerCase().includes(busca) ||
       c.contrato.toLowerCase().includes(busca) ||
       c.endereco.toLowerCase().includes(busca) ||
-      novoEnd.toLowerCase().includes(busca);
+      novoEnd.toLowerCase().includes(busca) ||
+      c.terminais.toLowerCase().includes(busca);
     // Agendamentos do próprio técnico ignoram filtro de cidade e bairro
     const skipGeofiltro = ehMeuAgendamento(c);
     return (
@@ -1736,6 +1755,14 @@ function renderizarLista(lista) {
       const db = contratoDistancias.get(b.id) ?? Infinity;
       return da - db;
     });
+  } else if (sortQntd === "mais") {
+    ordenada = [...lista].sort(
+      (a, b) => (parseInt(b.quantidade) || 0) - (parseInt(a.quantidade) || 0),
+    );
+  } else if (sortQntd === "menos") {
+    ordenada = [...lista].sort(
+      (a, b) => (parseInt(a.quantidade) || 0) - (parseInt(b.quantidade) || 0),
+    );
   } else {
     // Ordem padrão: agendados (mais próximo primeiro) → Pendente → Parcial → Quebra → Retirado
     const STATUS_ORDEM = {
@@ -3076,23 +3103,36 @@ function renderizarHistoricoPessoal() {
   let metaHTML = "";
   if (cidadesTec?.length) {
     const agora = new Date();
-    const inicioHoje = new Date(agora); inicioHoje.setHours(0, 0, 0, 0);
-    const fimHoje = new Date(agora); fimHoje.setHours(23, 59, 59, 999);
-    const diasNoMes = new Date(agora.getFullYear(), agora.getMonth() + 1, 0).getDate();
+    const inicioHoje = new Date(agora);
+    inicioHoje.setHours(0, 0, 0, 0);
+    const fimHoje = new Date(agora);
+    fimHoje.setHours(23, 59, 59, 999);
+    const diasNoMes = new Date(
+      agora.getFullYear(),
+      agora.getMonth() + 1,
+      0,
+    ).getDate();
 
-    const cards = cidadesTec.map((cidade) => {
-      const cidadeLow = cidade.toLowerCase();
-      const totalCidade = contratos.filter((c) => c.cidade.toLowerCase() === cidadeLow).length;
-      const meta = totalCidade > 0 ? Math.max(1, Math.round(totalCidade / diasNoMes)) : 0;
-      const feitosHoje = contratos.filter((c) => {
-        if (c.cidade.toLowerCase() !== cidadeLow) return false;
-        if (c.tecnicoExec?.trim().toLowerCase() !== usuarioLow) return false;
-        const ts = parseDateBR(c.dataExec);
-        return ts && ts >= inicioHoje.getTime() && ts <= fimHoje.getTime();
-      }).length;
-      const pct = meta > 0 ? Math.min(100, Math.round((feitosHoje / meta) * 100)) : 0;
-      const ok = feitosHoje >= meta;
-      return `<div class="mh-meta-card${ok ? " mh-meta-ok" : ""}">
+    const cards = cidadesTec
+      .map((cidade) => {
+        const cidadeLow = cidade.toLowerCase();
+        const totalCidade = contratos.filter(
+          (c) => c.cidade.toLowerCase() === cidadeLow,
+        ).length;
+        const meta =
+          totalCidade > 0
+            ? Math.max(1, Math.round(totalCidade / diasNoMes))
+            : 0;
+        const feitosHoje = contratos.filter((c) => {
+          if (c.cidade.toLowerCase() !== cidadeLow) return false;
+          if (c.tecnicoExec?.trim().toLowerCase() !== usuarioLow) return false;
+          const ts = parseDateBR(c.dataExec);
+          return ts && ts >= inicioHoje.getTime() && ts <= fimHoje.getTime();
+        }).length;
+        const pct =
+          meta > 0 ? Math.min(100, Math.round((feitosHoje / meta) * 100)) : 0;
+        const ok = feitosHoje >= meta;
+        return `<div class="mh-meta-card${ok ? " mh-meta-ok" : ""}">
         <div class="mh-meta-cidade">${escHtml(cidade)}</div>
         <div class="mh-meta-numeros">
           <span class="mh-meta-feitos">${feitosHoje}</span>
@@ -3104,7 +3144,8 @@ function renderizarHistoricoPessoal() {
         </div>
         <div class="mh-meta-sub">${totalCidade} contratos · ${diasNoMes} dias no mês</div>
       </div>`;
-    }).join("");
+      })
+      .join("");
     metaHTML = `<div class="mh-meta-titulo"><i data-lucide="target" class="icon icon-xs"></i> Meta do dia</div><div class="mh-meta-grid">${cards}</div>`;
   }
 
@@ -3194,7 +3235,10 @@ function renderizarAdmin() {
   else if (adminTabAtiva === "relatorio")
     conteudo.innerHTML = renderizarRelatorioHTML();
   else if (adminTabAtiva === "projecao") {
-    const dados = _calcularDadosProjecao(getContratosAdminSemPeriodo(), _filtroProjecao);
+    const dados = _calcularDadosProjecao(
+      getContratosAdminSemPeriodo(),
+      _filtroProjecao,
+    );
     conteudo.innerHTML = renderizarProjecaoHTML(dados);
     renderIcons();
     requestAnimationFrame(() => _initGraficos(dados));
@@ -3989,9 +4033,10 @@ function _destruirGraficos() {
 
 function _calcularDadosProjecao(lista, filtro) {
   filtro = filtro || "total";
-  const filtroStatuses = filtro === "ret"
-    ? ["Retirado", "Parcial"]
-    : ["Retirado", "Parcial", "Quebra"];
+  const filtroStatuses =
+    filtro === "ret"
+      ? ["Retirado", "Parcial"]
+      : ["Retirado", "Parcial", "Quebra"];
 
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
@@ -4035,10 +4080,14 @@ function _calcularDadosProjecao(lista, filtro) {
   }
   // Semana atual: extrapola para 7 dias com base nos dias já passados
   const diasPassadosSemana = diaSemana === 0 ? 7 : diaSemana;
-  const contSemAtual = contarViaApp(seg.getTime(), seg.getTime() + 7 * 86400000 - 1);
-  const semAtualExtrap = diasPassadosSemana > 0
-    ? Math.round((contSemAtual / diasPassadosSemana) * 7)
-    : 0;
+  const contSemAtual = contarViaApp(
+    seg.getTime(),
+    seg.getTime() + 7 * 86400000 - 1,
+  );
+  const semAtualExtrap =
+    diasPassadosSemana > 0
+      ? Math.round((contSemAtual / diasPassadosSemana) * 7)
+      : 0;
   taxasSemanais.push(semAtualExtrap);
 
   const temHistorico = taxasSemanais.some((v) => v > 0);
@@ -4096,7 +4145,9 @@ function _calcularDadosProjecao(lista, filtro) {
     semanaLabels.push((isHoje ? "▶ " : "") + DIAS_PT[dia.getDay()]);
     const ini = dia.getTime();
     const fim = ini + 86399999;
-    let ret = 0, par = 0, qbr = 0;
+    let ret = 0,
+      par = 0,
+      qbr = 0;
     lista.forEach((c) => {
       if (c.baixaSite !== "Sim") return;
       const ts = parseDateBR(c.dataExec);
@@ -4123,7 +4174,10 @@ function _calcularDadosProjecao(lista, filtro) {
     const fimSem = new Date(iniSem);
     fimSem.setDate(iniSem.getDate() + 6);
     fimSem.setHours(23, 59, 59, 999);
-    const label = iniSem.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+    const label = iniSem.toLocaleDateString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+    });
     evolLabels.push(label + (offset > 0 ? " ★" : ""));
     evolAtual.push(offset === 0);
     if (offset > 0) {
@@ -4141,9 +4195,13 @@ function _calcularDadosProjecao(lista, filtro) {
     const tec = c.tecnicoExec?.trim() || "—";
     rankMap[tec] = (rankMap[tec] || 0) + 1;
   });
-  const ranking = Object.entries(rankMap).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const ranking = Object.entries(rankMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
 
-  const projetadoFimMes = Math.round(execMes.length + taxaDiaria * (diasNoMes - diaHoje));
+  const projetadoFimMes = Math.round(
+    execMes.length + taxaDiaria * (diasNoMes - diaHoje),
+  );
   const base = statusCount.Pendente + execMes.length;
   const pct = base > 0 ? Math.round((execMes.length / base) * 100) : 0;
 
@@ -4184,7 +4242,7 @@ function renderizarProjecaoHTML(d) {
         <div class="proj-header-acoes">
           <select class="input-select-sm proj-filtro-escopo" onchange="mudarFiltroProjecao(this.value)">
             <option value="total" ${d.filtro === "total" ? "selected" : ""}>Total (incl. Quebras)</option>
-            <option value="ret"   ${d.filtro === "ret"   ? "selected" : ""}>Apenas Retiradas</option>
+            <option value="ret"   ${d.filtro === "ret" ? "selected" : ""}>Apenas Retiradas</option>
           </select>
           <button class="btn-export-pdf" onclick="gerarPDFProjecao()">
             <i data-lucide="file-down" class="icon icon-sm"></i> Exportar PDF
@@ -4289,10 +4347,14 @@ function _initGraficos(d) {
       },
       options: {
         responsive: true,
-        plugins: { legend: { position: "top", labels: { font: { size: 11 } } } },
+        plugins: {
+          legend: { position: "top", labels: { font: { size: 11 } } },
+        },
         scales: {
           y: { beginAtZero: true, ticks: { font: { size: 10 } } },
-          x: { ticks: { font: { size: 10 }, maxRotation: 0, maxTicksLimit: 15 } },
+          x: {
+            ticks: { font: { size: 10 }, maxRotation: 0, maxTicksLimit: 15 },
+          },
         },
       },
     });
@@ -4307,16 +4369,22 @@ function _initGraficos(d) {
         labels: d.semanaLabels,
         datasets: [
           { label: "Retirado", data: d.semanaRet, backgroundColor: "#16a34a" },
-          { label: "Parcial",  data: d.semanaParc, backgroundColor: "#f59e0b" },
-          { label: "Quebra",   data: d.semanaQbr,  backgroundColor: "#dc2626" },
+          { label: "Parcial", data: d.semanaParc, backgroundColor: "#f59e0b" },
+          { label: "Quebra", data: d.semanaQbr, backgroundColor: "#dc2626" },
         ],
       },
       options: {
         responsive: true,
-        plugins: { legend: { position: "top", labels: { font: { size: 11 } } } },
+        plugins: {
+          legend: { position: "top", labels: { font: { size: 11 } } },
+        },
         scales: {
           x: { stacked: true, ticks: { font: { size: 11 } } },
-          y: { stacked: true, beginAtZero: true, ticks: { font: { size: 10 } } },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            ticks: { font: { size: 10 } },
+          },
         },
       },
     });
@@ -4330,11 +4398,18 @@ function _initGraficos(d) {
       type: "doughnut",
       data: {
         labels: ["Pendente", "Retirado", "Parcial", "Quebra"],
-        datasets: [{
-          data: [d.statusCount.Pendente, d.statusCount.Retirado, d.statusCount.Parcial, d.statusCount.Quebra],
-          backgroundColor: ["#6b7280", "#16a34a", "#f59e0b", "#dc2626"],
-          borderWidth: 2,
-        }],
+        datasets: [
+          {
+            data: [
+              d.statusCount.Pendente,
+              d.statusCount.Retirado,
+              d.statusCount.Parcial,
+              d.statusCount.Quebra,
+            ],
+            backgroundColor: ["#6b7280", "#16a34a", "#f59e0b", "#dc2626"],
+            borderWidth: 2,
+          },
+        ],
       },
       options: {
         responsive: true,
@@ -4358,8 +4433,8 @@ function _initGraficos(d) {
   if (ctxEvol) {
     const coresEvol = d.evolVals.map((_, i) => {
       if (d.evolFutura[i]) return "rgba(37,99,235,0.28)"; // projetado
-      if (d.evolAtual[i]) return "#1d4ed8";               // semana atual
-      return "#2563eb";                                    // semanas passadas
+      if (d.evolAtual[i]) return "#1d4ed8"; // semana atual
+      return "#2563eb"; // semanas passadas
     });
     _chartInstances.evolSemanal = new Chart(ctxEvol, {
       type: "bar",
@@ -4369,7 +4444,9 @@ function _initGraficos(d) {
           {
             label: "Via app (real)",
             data: d.evolVals.map((v, i) => (!d.evolFutura[i] ? v : null)),
-            backgroundColor: d.evolVals.map((_, i) => d.evolAtual[i] ? "#1d4ed8" : "#2563eb"),
+            backgroundColor: d.evolVals.map((_, i) =>
+              d.evolAtual[i] ? "#1d4ed8" : "#2563eb",
+            ),
           },
           {
             label: "Projeção",
@@ -4388,7 +4465,9 @@ function _initGraficos(d) {
             callbacks: {
               title: (items) => {
                 const i = items[0].dataIndex;
-                return d.evolFutura[i] ? `Semana de ${d.evolLabels[i].replace(" ★", "")} (projeção)` : `Semana de ${d.evolLabels[i]}`;
+                return d.evolFutura[i]
+                  ? `Semana de ${d.evolLabels[i].replace(" ★", "")} (projeção)`
+                  : `Semana de ${d.evolLabels[i]}`;
               },
             },
           },
@@ -4409,11 +4488,15 @@ function _initGraficos(d) {
       type: "bar",
       data: {
         labels: d.ranking.map(([nome]) => nome),
-        datasets: [{
-          label: "Executados no mês",
-          data: d.ranking.map(([, n]) => n),
-          backgroundColor: d.ranking.map((_, i) => CORES_PÓDIO[i] ?? "#3b82f6"),
-        }],
+        datasets: [
+          {
+            label: "Executados no mês",
+            data: d.ranking.map(([, n]) => n),
+            backgroundColor: d.ranking.map(
+              (_, i) => CORES_PÓDIO[i] ?? "#3b82f6",
+            ),
+          },
+        ],
       },
       options: {
         indexAxis: "y",
@@ -4435,7 +4518,10 @@ function mudarFiltroProjecao(v) {
 
 function _loadScript(src) {
   return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+    if (document.querySelector(`script[src="${src}"]`)) {
+      resolve();
+      return;
+    }
     const s = document.createElement("script");
     s.src = src;
     s.onload = resolve;
@@ -4453,8 +4539,12 @@ async function gerarPDFProjecao() {
     renderIcons();
   }
   try {
-    await _loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
-    await _loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js");
+    await _loadScript(
+      "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+    );
+    await _loadScript(
+      "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js",
+    );
 
     const { jsPDF } = window.jspdf;
     const chartsEl = document.getElementById("projecao-charts");
@@ -4465,11 +4555,18 @@ async function gerarPDFProjecao() {
       logging: false,
     });
     const imgData = captura.toDataURL("image/png");
-    const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pdf = new jsPDF({
+      orientation: "landscape",
+      unit: "mm",
+      format: "a4",
+    });
     const pageW = pdf.internal.pageSize.getWidth();
     const pageH = pdf.internal.pageSize.getHeight();
     const hoje = new Date().toLocaleDateString("pt-BR");
-    const mesNome = new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+    const mesNome = new Date().toLocaleDateString("pt-BR", {
+      month: "long",
+      year: "numeric",
+    });
 
     // Cabeçalho azul
     pdf.setFillColor(0, 86, 179);
@@ -4480,10 +4577,15 @@ async function gerarPDFProjecao() {
     pdf.text("Backlog Safra — Relatório de Projeção", 10, 9);
     pdf.setFont(undefined, "normal");
     pdf.setFontSize(9);
-    pdf.text(`${mesNome}  ·  Gerado em ${hoje}`, pageW - 10, 9, { align: "right" });
+    pdf.text(`${mesNome}  ·  Gerado em ${hoje}`, pageW - 10, 9, {
+      align: "right",
+    });
 
     // Cards de resumo
-    const dados = _calcularDadosProjecao(getContratosAdminSemPeriodo(), _filtroProjecao);
+    const dados = _calcularDadosProjecao(
+      getContratosAdminSemPeriodo(),
+      _filtroProjecao,
+    );
     const cards = [
       { label: "Executados no mês", valor: String(dados.execMes) },
       { label: "Taxa média", valor: `${dados.taxaDiaria}/dia` },
