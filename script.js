@@ -1549,10 +1549,10 @@ function preencherFiltros() {
   aplicarFiltros();
 }
 
-function atualizarBairros() {
-  const cidadeSel = document.getElementById("filter-cidade").value;
+function atualizarBairros(cidadeSel = document.getElementById("filter-cidade").value) {
+  const normalizar = (s) => (s || "").trim().toLowerCase();
   const fonte = cidadeSel
-    ? contratos.filter((c) => c.cidade === cidadeSel)
+    ? contratos.filter((c) => normalizar(c.cidade) === normalizar(cidadeSel))
     : contratos;
   const bairros = [
     ...new Set(fonte.map((c) => c.bairro).filter(Boolean)),
@@ -4644,9 +4644,10 @@ function configurarEventos() {
     filtroAlterado();
   });
 
-  document.getElementById("filter-cidade").addEventListener("change", () => {
+  document.getElementById("filter-cidade").addEventListener("change", (e) => {
+    const cidadeSel = e.target.value;
     document.getElementById("filter-bairro").value = "";
-    atualizarBairros();
+    atualizarBairros(cidadeSel);
     filtroAlterado();
   });
   document
