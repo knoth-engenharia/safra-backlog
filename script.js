@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "2.8";
+const APP_VERSION = "3.0";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -60,6 +60,30 @@ function escHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// Lista de técnicos para lookup de nome e para a distribuição de carteira.
+// Guardada SEM a coluna SENHA — o app nunca precisa dela depois do login.
+const TECNICOS_KEY = "backlog_tecnicos";
+
+function _salvarTecnicosCache(lista) {
+  try {
+    const limpa = (lista || []).map((t) => ({
+      USUARIO: t["USUARIO"] || "",
+      NOME: t["NOME"] || "",
+      CIDADES: t["CIDADES"] || "",
+      ADM: t["ADM"] || "",
+    }));
+    localStorage.setItem(TECNICOS_KEY, JSON.stringify(limpa));
+  } catch {}
+}
+
+function _lerTecnicosCache() {
+  try {
+    return JSON.parse(localStorage.getItem(TECNICOS_KEY)) || [];
+  } catch {
+    return [];
+  }
 }
 
 function nomeTecnico(usuario) {
@@ -984,6 +1008,7 @@ async function tentarLogin() {
     const lista = respJson.data ?? [];
 
     todosOsTecnicos = lista; // armazena para lookup de nomes
+    _salvarTecnicosCache(lista); // versão sem SENHA, sobrevive ao reload
     const match = lista.find(
       (u) =>
         u["USUARIO"]?.trim().toLowerCase() === usuario &&
@@ -1520,6 +1545,10 @@ function iniciarApp() {
     if (!document.hidden) processarFilaBaixas();
   });
 
+  // Sessão salva não passa pelo login: reidrata a lista de técnicos do cache
+  // para nomeTecnico() e a aba Distribuir continuarem funcionando após reload
+  if (!todosOsTecnicos.length) todosOsTecnicos = _lerTecnicosCache();
+
   configurarEventos();
   atualizarIndicadorOffline();
   processarFilaBaixas();
@@ -1876,6 +1905,7 @@ function aplicarFiltros() {
   });
 
   salvarFiltros();
+  atualizarBarraMeta();
   renderizarLista(resultado);
 }
 
@@ -1920,6 +1950,190 @@ function extrairNovoEndereco(obs2) {
   if (!obs2) return null;
   const match = obs2.match(/Novo endere[çc]o:\s*(.+)/i);
   return match ? match[1].trim() : null;
+}
+
+// =========================================
+// META DE RECUPERAÇÃO — por EQUIPAMENTO, não por contrato
+//
+// Numerador   = nº de seriais em SERIAIS_RETIRADOS (o campo vem "AAA / BBB")
+// Denominador = soma de QNTD dos contratos da cidade
+//
+// Depende SÓ do filtro de cidade. Status, bairro e período não entram: a meta
+// é da cidade inteira, não da visão atual — senão o número dançaria a cada filtro.
+// =========================================
+const METAS = { total: 0.78, opcao: 0.9, inad: 0.7 };
+const META_ROTULOS = {
+  total: "Total",
+  opcao: "Opção",
+  inad: "Inadimplência",
+};
+
+// Cidades que o técnico realmente atende. Agendamentos cross-cidade entram na
+// lista de contratos mas NÃO contam para a meta dele.
+function _cidadesPermitidas() {
+  const t = tecnicoLogado();
+  if (!t?.cidades?.length) return null; // null = admin / "TODOS" = todas
+  return new Set(t.cidades.map((c) => c.trim().toLowerCase()));
+}
+
+function _grupoVazio() {
+  return { ret: 0, tot: 0 };
+}
+
+function calcularMetaEquipamentos(cidadeFiltro) {
+  const acesso = _cidadesPermitidas();
+  const alvo = cidadeFiltro?.trim().toLowerCase() || "";
+  const mapa = {};
+
+  contratos.forEach((c) => {
+    const cidade = c.cidade || "—";
+    const cidadeLow = cidade.trim().toLowerCase();
+    if (acesso && !acesso.has(cidadeLow)) return;
+    if (alvo && cidadeLow !== alvo) return;
+
+    if (!mapa[cidade]) {
+      mapa[cidade] = {
+        cidade,
+        total: _grupoVazio(),
+        opcao: _grupoVazio(),
+        inad: _grupoVazio(),
+      };
+    }
+    const g = mapa[cidade];
+
+    const retirados = parsearSeriais(c.seriaisRet).length;
+    // QNTD é a fonte oficial. Quando vem vazia, cai para a contagem de TERMINAIS
+    // — sem isso o contrato entraria no numerador e não no denominador, gerando %
+    // acima de 100.
+    const total = parseInt(c.quantidade) || parsearSeriais(c.terminais).length;
+
+    g.total.ret += retirados;
+    g.total.tot += total;
+    const cat = categoriaTipo(c);
+    if (cat === "opcao" || cat === "inad") {
+      g[cat].ret += retirados;
+      g[cat].tot += total;
+    }
+  });
+
+  return Object.values(mapa).sort((a, b) => a.cidade.localeCompare(b.cidade));
+}
+
+function _somarGrupos(dados, chave) {
+  return dados.reduce(
+    (acc, d) => ({ ret: acc.ret + d[chave].ret, tot: acc.tot + d[chave].tot }),
+    _grupoVazio(),
+  );
+}
+
+// Faixas fixas 20/40/60 e verde a partir da meta do segmento
+function classeMeta(pct, meta) {
+  if (pct >= meta * 100) return "meta-verde";
+  if (pct >= 60) return "meta-verde-claro";
+  if (pct >= 40) return "meta-amarelo";
+  if (pct >= 20) return "meta-laranja";
+  return "meta-vermelho";
+}
+
+function _pctMeta(grupo) {
+  return grupo.tot > 0 ? (grupo.ret / grupo.tot) * 100 : 0;
+}
+
+function _fmtPct(pct) {
+  return pct.toFixed(2).replace(".", ",") + "%";
+}
+
+// Quantos equipamentos ainda faltam para bater a meta
+function _faltaParaMeta(grupo, meta) {
+  if (!grupo.tot) return 0;
+  return Math.max(0, Math.ceil(meta * grupo.tot) - grupo.ret);
+}
+
+function atualizarBarraMeta() {
+  const el = document.getElementById("meta-barra");
+  if (!el) return;
+  const cidadeFiltro = document.getElementById("filter-cidade")?.value || "";
+  const dados = calcularMetaEquipamentos(cidadeFiltro);
+  const geral = _somarGrupos(dados, "total");
+
+  if (!geral.tot) {
+    el.classList.add("hidden");
+    return;
+  }
+
+  const pct = _pctMeta(geral);
+  const falta = _faltaParaMeta(geral, METAS.total);
+  const escopo = cidadeFiltro
+    ? escHtml(cidadeFiltro)
+    : dados.length === 1
+      ? escHtml(dados[0].cidade)
+      : `${dados.length} cidades`;
+
+  el.className = `meta-barra ${classeMeta(pct, METAS.total)}`;
+  el.innerHTML = `
+    <span class="meta-escopo"><i data-lucide="target" class="icon icon-sm"></i> ${escopo}</span>
+    <span class="meta-numeros">${geral.ret}/${geral.tot}</span>
+    <span class="meta-pct">(${_fmtPct(pct)})</span>
+    <span class="meta-falta">${falta > 0 ? `faltam ${falta}` : "meta batida"}</span>
+    <i data-lucide="chevron-right" class="icon icon-sm meta-seta"></i>`;
+  renderIcons();
+}
+
+function _linhaMetaHTML(rotulo, grupo, meta) {
+  if (!grupo.tot) return "";
+  const pct = _pctMeta(grupo);
+  const falta = _faltaParaMeta(grupo, meta);
+  return `
+    <div class="meta-linha ${classeMeta(pct, meta)}">
+      <span class="meta-linha-rotulo">${rotulo}</span>
+      <span class="meta-linha-num">${grupo.ret}/${grupo.tot}</span>
+      <span class="meta-linha-pct">${_fmtPct(pct)}</span>
+      <span class="meta-linha-meta">meta ${Math.round(meta * 100)}%</span>
+      <span class="meta-linha-falta">${falta > 0 ? `faltam ${falta}` : "✓"}</span>
+    </div>`;
+}
+
+function _blocoCidadeHTML(d) {
+  const linhas = ["total", "opcao", "inad"]
+    .map((k) => _linhaMetaHTML(META_ROTULOS[k], d[k], METAS[k]))
+    .join("");
+  return `
+    <div class="meta-cidade">
+      <div class="meta-cidade-nome">${escHtml(d.cidade)}</div>
+      ${linhas}
+    </div>`;
+}
+
+function abrirMetaDetalhe() {
+  const cidadeFiltro = document.getElementById("filter-cidade")?.value || "";
+  const dados = calcularMetaEquipamentos(cidadeFiltro);
+  if (!dados.length) return;
+
+  // Mais de uma cidade: consolidado no topo para não precisar filtrar uma a uma
+  const consolidado =
+    dados.length > 1
+      ? `<div class="meta-cidade meta-cidade-geral">
+           <div class="meta-cidade-nome">Todas as suas cidades</div>
+           ${["total", "opcao", "inad"]
+             .map((k) =>
+               _linhaMetaHTML(META_ROTULOS[k], _somarGrupos(dados, k), METAS[k]),
+             )
+             .join("")}
+         </div>`
+      : "";
+
+  document.getElementById("meta-body").innerHTML = `
+    <p class="meta-legenda">
+      Equipamentos retirados sobre o total de equipamentos da cidade.
+    </p>
+    ${consolidado}
+    ${dados.map(_blocoCidadeHTML).join("")}`;
+  document.getElementById("modal-meta").classList.remove("hidden");
+  renderIcons();
+}
+
+function fecharMetaDetalhe() {
+  document.getElementById("modal-meta").classList.add("hidden");
 }
 
 // =========================================
@@ -3442,6 +3656,11 @@ function renderizarAdmin() {
   _destruirGraficos(); // limpa instâncias Chart.js ao trocar de aba
   const lista = getContratosAdmin();
   const conteudo = document.getElementById("admin-conteudo");
+  if (adminTabAtiva === "distribuir") {
+    conteudo.innerHTML = renderizarDistribuirHTML();
+    renderIcons();
+    return;
+  }
   if (adminTabAtiva === "metricas")
     conteudo.innerHTML = renderizarMetricasHTML(lista);
   else if (adminTabAtiva === "historico")
@@ -4122,6 +4341,281 @@ function calcularEficienciaPeriodosViaSite() {
     .sort(([a], [b]) => b.localeCompare(a))
     .slice(0, 6)
     .map(([, v]) => v);
+}
+
+// =========================================
+// DISTRIBUIÇÃO DE CARTEIRA (admin)
+//
+// Grava TECNICO_DESIG / DATA / HORARIO / OBS 1 em lote, sempre no formato certo.
+// Substitui a edição manual na planilha — que é de onde saíam agendamentos
+// malformados (data escrita dentro do OBS 1, por exemplo).
+// =========================================
+let distSelecionados = new Set();
+
+const DIST_HORARIOS = ["MANHÃ", "TARDE", "COMERCIAL"];
+
+// Só faz sentido distribuir o que ainda não foi executado
+function _contratosDistribuiveis() {
+  const cidade = document.getElementById("dist-cidade")?.value || "";
+  const bairro = document.getElementById("dist-bairro")?.value || "";
+  const soSemTecnico =
+    document.getElementById("dist-so-sem-tecnico")?.checked ?? true;
+  const busca = (document.getElementById("dist-busca")?.value || "")
+    .trim()
+    .toLowerCase();
+
+  return contratos
+    .filter((c) => c.status === "Pendente")
+    .filter((c) => !cidade || c.cidade === cidade)
+    .filter((c) => !bairro || c.bairro === bairro)
+    .filter((c) => !soSemTecnico || !c.tecnicoDesig?.trim())
+    .filter(
+      (c) =>
+        !busca ||
+        c.nome?.toLowerCase().includes(busca) ||
+        c.contrato?.toLowerCase().includes(busca) ||
+        c.endereco?.toLowerCase().includes(busca),
+    )
+    .sort(
+      (a, b) =>
+        a.cidade.localeCompare(b.cidade) ||
+        a.bairro.localeCompare(b.bairro) ||
+        a.endereco.localeCompare(b.endereco),
+    );
+}
+
+function renderizarDistribuirHTML() {
+  const lista = _contratosDistribuiveis();
+  const cidades = [...new Set(contratos.map((c) => c.cidade))]
+    .filter(Boolean)
+    .sort();
+  const cidadeSel = document.getElementById("dist-cidade")?.value || "";
+  const bairros = [
+    ...new Set(
+      contratos
+        .filter((c) => !cidadeSel || c.cidade === cidadeSel)
+        .map((c) => c.bairro),
+    ),
+  ]
+    .filter(Boolean)
+    .sort();
+  const bairroSel = document.getElementById("dist-bairro")?.value || "";
+  const soSemTecnico =
+    document.getElementById("dist-so-sem-tecnico")?.checked ?? true;
+  const busca = document.getElementById("dist-busca")?.value || "";
+
+  // Técnicos válidos vêm da aba TECNICOS — nunca digitados à mão
+  const tecnicos = (todosOsTecnicos.length
+    ? todosOsTecnicos
+    : _lerTecnicosCache()
+  )
+    .filter((t) => t["USUARIO"])
+    .sort((a, b) =>
+      (a["NOME"] || a["USUARIO"]).localeCompare(b["NOME"] || b["USUARIO"]),
+    );
+
+  if (!tecnicos.length) {
+    return `<div class="admin-secao"><div class="estado-vazio">
+      <p>Lista de técnicos indisponível. Saia e entre novamente para recarregá-la.</p>
+    </div></div>`;
+  }
+
+  const opt = (v, sel, label) =>
+    `<option value="${escHtml(v)}"${v === sel ? " selected" : ""}>${escHtml(label ?? v)}</option>`;
+
+  const linhas = lista.length
+    ? lista
+        .map(
+          (c) => `
+      <label class="dist-item${distSelecionados.has(c.id) ? " dist-item-sel" : ""}">
+        <input type="checkbox" class="dist-check" value="${escHtml(c.id)}"
+               ${distSelecionados.has(c.id) ? "checked" : ""}
+               onchange="toggleDistSelecao(this)" />
+        <span class="dist-item-corpo">
+          <span class="dist-item-nome">${escHtml(c.nome)}</span>
+          <span class="dist-item-end">${escHtml(c.cidade)} — ${escHtml(c.bairro)} · ${escHtml(c.endereco)}</span>
+          <span class="dist-item-meta">${escHtml(c.contrato)}${c.tecnicoDesig ? ` · já com ${escHtml(nomeTecnico(c.tecnicoDesig) || c.tecnicoDesig)}` : ""}${c.quantidade ? ` · ${escHtml(c.quantidade)} equip.` : ""}</span>
+        </span>
+      </label>`,
+        )
+        .join("")
+    : `<div class="estado-vazio"><p>Nenhum contrato pendente com esses filtros.</p></div>`;
+
+  return `
+    <div class="admin-secao">
+      <div class="dist-filtros">
+        <select id="dist-cidade" class="input-select" onchange="filtroDistAlterado(true)">
+          <option value="">Cidade</option>
+          ${cidades.map((c) => opt(c, cidadeSel)).join("")}
+        </select>
+        <select id="dist-bairro" class="input-select" onchange="filtroDistAlterado()">
+          <option value="">Bairro</option>
+          ${bairros.map((b) => opt(b, bairroSel)).join("")}
+        </select>
+        <input type="text" id="dist-busca" class="input-search" placeholder="Buscar nome, contrato ou endereço..."
+               value="${escHtml(busca)}" oninput="filtroDistAlterado()" />
+        <label class="dist-toggle">
+          <input type="checkbox" id="dist-so-sem-tecnico" ${soSemTecnico ? "checked" : ""}
+                 onchange="filtroDistAlterado()" />
+          Só sem técnico designado
+        </label>
+      </div>
+
+      <div class="dist-acoes-topo">
+        <span class="dist-contador">${lista.length} pendente(s) · <strong>${distSelecionados.size}</strong> selecionado(s)</span>
+        <button class="btn-subview" onclick="selecionarTodosDist()">Selecionar todos</button>
+        <button class="btn-subview" onclick="limparSelecaoDist()">Limpar</button>
+      </div>
+
+      <div class="dist-lista">${linhas}</div>
+
+      <div class="dist-form">
+        <div class="dist-form-linha">
+          <label class="detalhe-label">Técnico</label>
+          <select id="dist-tecnico" class="input-select">
+            <option value="">Selecione o técnico...</option>
+            ${tecnicos.map((t) => opt(t["USUARIO"], "", `${t["NOME"] || t["USUARIO"]} (${t["USUARIO"]})`)).join("")}
+          </select>
+        </div>
+        <div class="dist-form-linha">
+          <label class="detalhe-label">Data</label>
+          <input type="date" id="dist-data" class="input-select" />
+        </div>
+        <div class="dist-form-linha">
+          <label class="detalhe-label">Horário</label>
+          <select id="dist-horario" class="input-select">
+            ${DIST_HORARIOS.map((h) => opt(h, "MANHÃ")).join("")}
+          </select>
+        </div>
+        <button class="btn btn-retirado" onclick="confirmarDistribuicao()">
+          <i data-lucide="send" class="icon icon-sm"></i> Designar selecionados
+        </button>
+        <p class="dist-aviso">
+          Grava <strong>TECNICO_DESIG</strong>, <strong>DATA</strong>, <strong>HORARIO</strong>
+          e <strong>OBS 1 = AGENDADO</strong>. A data vai sempre como DD/MM/AAAA.
+        </p>
+      </div>
+    </div>`;
+}
+
+function filtroDistAlterado(limpouCidade) {
+  if (limpouCidade) {
+    const b = document.getElementById("dist-bairro");
+    if (b) b.value = "";
+  }
+  // Preserva o que o usuário digitou/escolheu antes de re-renderizar
+  const foco = document.activeElement?.id;
+  const pos = document.getElementById("dist-busca")?.selectionStart;
+  renderizarAdmin();
+  if (foco) {
+    const el = document.getElementById(foco);
+    if (el) {
+      el.focus();
+      if (foco === "dist-busca" && pos != null)
+        el.setSelectionRange(pos, pos);
+    }
+  }
+}
+
+function toggleDistSelecao(input) {
+  if (input.checked) distSelecionados.add(input.value);
+  else distSelecionados.delete(input.value);
+  input.closest(".dist-item")?.classList.toggle("dist-item-sel", input.checked);
+  const cont = document.querySelector(".dist-contador strong");
+  if (cont) cont.textContent = String(distSelecionados.size);
+}
+
+function selecionarTodosDist() {
+  _contratosDistribuiveis().forEach((c) => distSelecionados.add(c.id));
+  renderizarAdmin();
+}
+
+function limparSelecaoDist() {
+  distSelecionados.clear();
+  renderizarAdmin();
+}
+
+function _dataISOparaBR(iso) {
+  const m = iso?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+}
+
+async function confirmarDistribuicao() {
+  const tecnico = document.getElementById("dist-tecnico")?.value || "";
+  const dataISO = document.getElementById("dist-data")?.value || "";
+  const horario = document.getElementById("dist-horario")?.value || "";
+  const dataBR = _dataISOparaBR(dataISO);
+
+  if (!distSelecionados.size)
+    return mostrarToast("Selecione ao menos um contrato.", "aviso");
+  if (!tecnico) return mostrarToast("Selecione o técnico.", "aviso");
+  if (!dataBR) return mostrarToast("Informe a data do agendamento.", "aviso");
+
+  const alvos = contratos.filter((c) => distSelecionados.has(c.id));
+  const nome = nomeTecnico(tecnico) || tecnico;
+  if (
+    !confirm(
+      `Designar ${alvos.length} contrato(s) para ${nome} em ${dataBR} (${horario})?`,
+    )
+  )
+    return;
+
+  const campos = {
+    TECNICO_DESIG: tecnico,
+    DATA: dataBR,
+    HORARIO: horario,
+    "OBS 1": "AGENDADO",
+  };
+  const itens = alvos.map((c) => ({ keyVal: c.contrato, data: campos }));
+
+  _setCarregando(+1);
+  try {
+    const fd = new FormData();
+    fd.append(
+      "payload",
+      JSON.stringify({
+        action: "lote",
+        sheet: "SAFRA",
+        keyCol: "CONTRATO",
+        itens,
+      }),
+    );
+    const resp = await fetchComTimeout(GAS_URL, { method: "POST", body: fd });
+    if (!resp.ok) throw new Error(`Erro HTTP ${resp.status}`);
+    const json = await resp.json().catch(() => ({}));
+    if (json.error) throw new Error(json.error);
+
+    // Reflete localmente sem esperar novo GET
+    alvos.forEach((c) => {
+      const idx = contratos.findIndex((x) => x.id === c.id);
+      if (idx !== -1) {
+        contratos[idx] = {
+          ...contratos[idx],
+          tecnicoDesig: tecnico,
+          dataAgend: dataBR,
+          horario,
+          obs1: "AGENDADO",
+        };
+      }
+    });
+    salvarContratosIDB(contratos, tecnicoLogado()?.usuario);
+    distSelecionados.clear();
+    mostrarToast(
+      `${json.updated ?? alvos.length} contrato(s) designado(s) para ${escHtml(nome)}.`,
+      "sucesso",
+    );
+    renderizarAdmin();
+  } catch (e) {
+    console.error("Erro na distribuição:", e);
+    mostrarToast(
+      ehErroDeRede(e)
+        ? "Sem conexão estável. Nada foi designado — tente novamente."
+        : `Erro ao designar: ${escHtml(e.message || "desconhecido")}`,
+      "erro",
+    );
+  } finally {
+    _setCarregando(-1);
+  }
 }
 
 function baixarCSV() {

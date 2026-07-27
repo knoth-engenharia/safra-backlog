@@ -2274,6 +2274,153 @@ body {
   .offline-banner-pendente #offline-icone { animation: none; }
 }
 
+/* =========================================
+   BARRA DE META (equipamentos retirados / total)
+   ========================================= */
+.meta-barra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+.meta-barra:active { filter: brightness(0.92); }
+.meta-escopo { display: flex; align-items: center; gap: 5px; }
+.meta-numeros { margin-left: auto; font-size: 0.95rem; }
+.meta-pct { font-size: 0.95rem; }
+.meta-falta {
+  font-size: 0.72rem;
+  font-weight: 500;
+  opacity: 0.92;
+  padding-left: 6px;
+  border-left: 1px solid rgba(255,255,255,0.35);
+}
+.meta-seta { flex-shrink: 0; opacity: 0.8; }
+
+/* Faixas de cor — verde só a partir da meta do segmento */
+.meta-vermelho    { background: #dc2626; }
+.meta-laranja     { background: #ea580c; }
+.meta-amarelo     { background: #ca8a04; }
+.meta-verde-claro { background: #65a30d; }
+.meta-verde       { background: #16a34a; }
+
+/* ----- Modal de detalhe ----- */
+.meta-legenda {
+  font-size: 0.78rem;
+  color: #6b7280;
+  margin-bottom: 14px;
+}
+.meta-cidade { margin-bottom: 16px; }
+.meta-cidade-geral {
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.meta-cidade-nome {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #111827;
+  margin-bottom: 6px;
+}
+.meta-linha {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 5px;
+  color: #fff;
+}
+.meta-linha-rotulo { font-size: 0.82rem; font-weight: 700; }
+.meta-linha-num { font-size: 0.85rem; font-weight: 700; }
+.meta-linha-pct { font-size: 0.85rem; font-weight: 800; }
+.meta-linha-meta {
+  grid-column: 1;
+  font-size: 0.7rem;
+  font-weight: 500;
+  opacity: 0.85;
+}
+.meta-linha-falta {
+  grid-column: 2 / -1;
+  text-align: right;
+  font-size: 0.72rem;
+  font-weight: 600;
+  opacity: 0.95;
+}
+
+/* =========================================
+   DISTRIBUIÇÃO DE CARTEIRA (admin)
+   ========================================= */
+.dist-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.dist-filtros .input-select,
+.dist-filtros .input-search { flex: 1 1 150px; min-width: 0; }
+.dist-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: #374151;
+  flex: 1 1 100%;
+}
+.dist-acoes-topo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.dist-contador { font-size: 0.8rem; color: #4b5563; margin-right: auto; }
+.dist-lista {
+  max-height: 46vh;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 4px;
+  margin-bottom: 14px;
+}
+.dist-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+}
+.dist-item:last-child { border-bottom: none; }
+.dist-item-sel { background: #eff6ff; }
+.dist-check { width: 20px; height: 20px; flex-shrink: 0; margin-top: 2px; }
+.dist-item-corpo { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dist-item-nome { font-size: 0.86rem; font-weight: 700; color: #111827; }
+.dist-item-end { font-size: 0.76rem; color: #4b5563; }
+.dist-item-meta { font-size: 0.72rem; color: #6b7280; }
+.dist-form {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 12px;
+}
+.dist-form-linha { margin-bottom: 10px; }
+.dist-form-linha .input-select { width: 100%; }
+.dist-aviso {
+  font-size: 0.74rem;
+  color: #6b7280;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
 /* ===== ICG TABLE ===== */
 .icg-table th, .icg-table td {
   font-size: 0.78rem;

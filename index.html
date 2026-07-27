@@ -155,6 +155,9 @@
         </div>
       </section>
 
+      <!-- Barra de meta por equipamentos (seriais retirados / QNTD) -->
+      <button id="meta-barra" class="meta-barra hidden" onclick="abrirMetaDetalhe()"></button>
+
       <p class="resultado-count" id="resultado-count">
         Carregando contratos...
       </p>
@@ -210,6 +213,9 @@
         <button class="admin-tab" data-tab="projecao">
           <i data-lucide="trending-up" class="icon icon-sm"></i> Projeção
         </button>
+        <button class="admin-tab" data-tab="distribuir">
+          <i data-lucide="user-plus" class="icon icon-sm"></i> Distribuir
+        </button>
       </div>
       <div class="admin-filtros">
         <select id="adm-filter-cidade" class="input-select">
@@ -235,6 +241,19 @@
           <i data-lucide="x" class="icon icon-sm"></i> Fechar
         </button>
         <div id="modal-body"></div>
+      </div>
+    </div>
+
+    <!-- ===== MODAL META (detalhe por cidade e tipo) ===== -->
+    <div id="modal-meta" class="modal hidden">
+      <div class="modal-content">
+        <div class="connect-header">
+          <span class="connect-titulo">Meta de recuperação</span>
+          <button class="modal-fechar" onclick="fecharMetaDetalhe()">
+            <i data-lucide="x" class="icon icon-sm"></i> Fechar
+          </button>
+        </div>
+        <div id="meta-body"></div>
       </div>
     </div>
 
