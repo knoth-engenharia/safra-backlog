@@ -234,6 +234,41 @@ function criarBadgeSLA(c) {
 }
 
 // ---- Filtro de período (baseado em DATA_PEND) ----
+// ---- Intervalo livre de datas (usado pela lista de contratos) ----
+// Os <input type="date"> devolvem ISO "YYYY-MM-DD". Montamos a Date no fuso
+// local — `new Date("2026-07-25")` seria interpretado como UTC e voltaria um dia
+// em fusos negativos como o nosso.
+function isoParaDateLocal(iso, fimDoDia) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!m) return null;
+  return fimDoDia
+    ? new Date(+m[1], +m[2] - 1, +m[3], 23, 59, 59, 999)
+    : new Date(+m[1], +m[2] - 1, +m[3], 0, 0, 0, 0);
+}
+
+function dataBRParaDate(str) {
+  const m = /(\d{2})\/(\d{2})\/(\d{4})/.exec(str || "");
+  return m ? new Date(+m[3], +m[2] - 1, +m[1]) : null;
+}
+
+// Filtra por DATA_PEND (entrada no backlog). Intervalo inclusivo nas duas pontas.
+function filtrarPorIntervalo(c, ini, fim) {
+  if (!ini && !fim) return true;
+  const data = dataBRParaDate(c.dataPend);
+  if (!data) return false;
+  let dIni = isoParaDateLocal(ini, false);
+  let dFim = isoParaDateLocal(fim, true);
+  // Datas invertidas: assume que a pessoa trocou os campos de lugar
+  if (dIni && dFim && dIni > dFim) {
+    dIni = isoParaDateLocal(fim, false);
+    dFim = isoParaDateLocal(ini, true);
+  }
+  if (dIni && data < dIni) return false;
+  if (dFim && data > dFim) return false;
+  return true;
+}
+
+// Mantida para o painel admin, que segue com os períodos pré-definidos
 function filtrarPorPeriodo(c, periodo) {
   if (!periodo) return true;
   if (!c.dataPend) return false;
@@ -1697,7 +1732,8 @@ function salvarFiltros() {
     status: document.getElementById("filter-status").value,
     tipo: document.getElementById("filter-tipo").value,
     tecnico: document.getElementById("filter-tecnico").value,
-    periodo: document.getElementById("filter-periodo")?.value || "",
+    dataIni: document.getElementById("filter-data-ini")?.value || "",
+    dataFim: document.getElementById("filter-data-fim")?.value || "",
     distancia: document.getElementById("filter-distancia")?.value || "",
     sortQntd: document.getElementById("sort-qntd")?.value || "",
   };
@@ -1748,9 +1784,13 @@ function preencherFiltros() {
       document.getElementById("filter-tecnico").value = saved.tecnico;
   }
 
-  if (saved.periodo) {
-    const elPer = document.getElementById("filter-periodo");
-    if (elPer) elPer.value = saved.periodo;
+  if (saved.dataIni) {
+    const el = document.getElementById("filter-data-ini");
+    if (el) el.value = saved.dataIni;
+  }
+  if (saved.dataFim) {
+    const el = document.getElementById("filter-data-fim");
+    if (el) el.value = saved.dataFim;
   }
   if (saved.distancia) {
     const elDist = document.getElementById("filter-distancia");
@@ -1798,8 +1838,10 @@ function limparFiltros() {
   document.getElementById("filter-status").value = "";
   document.getElementById("filter-tipo").value = "";
   document.getElementById("filter-tecnico").value = "";
-  const elPer = document.getElementById("filter-periodo");
-  if (elPer) elPer.value = "";
+  const elIni = document.getElementById("filter-data-ini");
+  if (elIni) elIni.value = "";
+  const elFim = document.getElementById("filter-data-fim");
+  if (elFim) elFim.value = "";
   const elDist = document.getElementById("filter-distancia");
   if (elDist) elDist.value = "";
   const elSq = document.getElementById("sort-qntd");
@@ -1848,7 +1890,8 @@ function atualizarBadgeFiltros() {
     "filter-status",
     "filter-tipo",
     "filter-tecnico",
-    "filter-periodo",
+    "filter-data-ini",
+    "filter-data-fim",
     "filter-distancia",
     "sort-qntd",
   ];
@@ -1871,7 +1914,8 @@ function aplicarFiltros() {
   const status = document.getElementById("filter-status").value;
   const tipo = document.getElementById("filter-tipo").value;
   const tecnico = document.getElementById("filter-tecnico").value;
-  const periodo = document.getElementById("filter-periodo")?.value || "";
+  const dataIni = document.getElementById("filter-data-ini")?.value || "";
+  const dataFim = document.getElementById("filter-data-fim")?.value || "";
   const distFiltro = document.getElementById("filter-distancia")?.value || "";
 
   const { usuario: usuarioLogado, adm: isAdm } = tecnicoLogado() || {};
@@ -1899,7 +1943,7 @@ function aplicarFiltros() {
       (!status || c.status === status) &&
       (!tipo || c.tipoDesconexao === tipo) &&
       (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico) &&
-      filtrarPorPeriodo(c, periodo) &&
+      filtrarPorIntervalo(c, dataIni, dataFim) &&
       filtrarPorDistancia(c, distFiltro)
     );
   });
@@ -5370,8 +5414,10 @@ function configurarEventos() {
   document
     .getElementById("filter-tecnico")
     .addEventListener("change", filtroAlterado);
-  const elPeriodo = document.getElementById("filter-periodo");
-  if (elPeriodo) elPeriodo.addEventListener("change", filtroAlterado);
+  ["filter-data-ini", "filter-data-fim"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", filtroAlterado);
+  });
 
   const elDist = document.getElementById("filter-distancia");
   if (elDist) {
