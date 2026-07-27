@@ -2260,6 +2260,19 @@ body {
   font-weight: 400;
   opacity: 0.9;
 }
+#offline-icone { display: flex; align-items: center; flex-shrink: 0; }
+/* Online, mas ainda há baixas/fotos na fila — azul, não é erro */
+.offline-banner-pendente { background: #1d4ed8; }
+.offline-banner-pendente #offline-icone {
+  animation: offline-pulso 1.6s ease-in-out infinite;
+}
+@keyframes offline-pulso {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .offline-banner-pendente #offline-icone { animation: none; }
+}
 
 /* ===== ICG TABLE ===== */
 .icg-table th, .icg-table td {

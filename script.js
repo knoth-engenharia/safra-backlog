@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "2.7";
+const APP_VERSION = "2.8";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -122,6 +122,30 @@ function renderIcons() {
 }
 
 // =========================================
+// REDE — fetch com timeout
+// `navigator.onLine` no Android só diz que existe interface de rede, não que
+// existe internet. Em sinal fraco o fetch fica pendurado indefinidamente e a
+// baixa nunca é salva nem enfileirada. O timeout força o caminho offline.
+// =========================================
+const FETCH_TIMEOUT_MS = 20000;
+const UPLOAD_TIMEOUT_MS = 60000; // fotos são maiores — mais folga
+
+async function fetchComTimeout(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function ehErroDeRede(e) {
+  // AbortError (timeout) ou TypeError (DNS/conexão recusada) = sem internet real
+  return e?.name === "AbortError" || e instanceof TypeError;
+}
+
+// =========================================
 // WHATSAPP
 // =========================================
 function formatarTelefone(tel) {
@@ -152,7 +176,7 @@ function registrarMsgEnviada(contratoId, event) {
         data: { [COL_MSG_ENVIADA]: agora },
       }),
     );
-    fetch(GAS_URL, { method: "POST", body: fd }).catch(() => {});
+    fetchComTimeout(GAS_URL, { method: "POST", body: fd }).catch(() => {});
   }
   // Atualiza o card na tela sem recarregar tudo
   setTimeout(() => aplicarFiltros(), 150);
@@ -628,16 +652,32 @@ async function registrarTentativa() {
   const data = formatarDataExec();
   const visitasAnt = contratoAtivo.visitas || "";
   const novas = visitasAnt ? `${visitasAnt}|${data}` : data;
-  try {
-    await salvarNaPlanilha(contratoAtivo, { [COL_VISITAS]: novas });
+  const aplicarLocal = () => {
     const idx = contratos.findIndex((c) => c.id === contratoAtivo.id);
     if (idx !== -1) {
       contratos[idx] = { ...contratos[idx], visitas: novas };
       contratoAtivo = contratos[idx];
     }
+  };
+  try {
+    await salvarNaPlanilha(contratoAtivo, { [COL_VISITAS]: novas });
+    aplicarLocal();
     mostrarToast("Tentativa de visita registrada.", "sucesso");
     abrirModal(contratoAtivo);
   } catch (e) {
+    // Offline não é erro: a tentativa FOI enfileirada e sobe ao reconectar.
+    // Dizer "erro, tente novamente" fazia o técnico repetir uma ação que deu certo.
+    if (e instanceof OfflineError) {
+      aplicarLocal();
+      salvarContratosIDB(contratos, tecnicoLogado()?.usuario);
+      atualizarIndicadorOffline();
+      mostrarToast(
+        "Sem conexão. Tentativa salva no aparelho e será enviada ao reconectar.",
+        "aviso",
+      );
+      abrirModal(contratoAtivo);
+      return;
+    }
     console.error("Erro ao registrar tentativa:", e);
     mostrarToast("Erro ao salvar. Tente novamente.", "erro");
     btns.forEach((b) => (b.disabled = false));
@@ -710,7 +750,7 @@ function enviarHeartbeat(isLogin = false) {
       isLogin,
     }),
   );
-  fetch(GAS_URL, { method: "POST", body: fd }).catch(() => {});
+  fetchComTimeout(GAS_URL, { method: "POST", body: fd }).catch(() => {});
 }
 
 function iniciarHeartbeat() {
@@ -939,7 +979,7 @@ async function tentarLogin() {
   erro.classList.add("hidden");
 
   try {
-    const resp = await fetch(`${GAS_URL}?sheet=TECNICOS`);
+    const resp = await fetchComTimeout(`${GAS_URL}?sheet=TECNICOS`);
     const respJson = await resp.json();
     const lista = respJson.data ?? [];
 
@@ -1037,7 +1077,7 @@ function mapearContrato(linha, indice) {
 class OfflineError extends Error {}
 
 const IDB_NAME = "backlog_safra_db";
-const IDB_VERSION = 2;
+const IDB_VERSION = 3;
 
 function abrirIDB() {
   return new Promise((resolve, reject) => {
@@ -1053,6 +1093,11 @@ function abrirIDB() {
       // v2: agendamentos do dia para o SW disparar notificações
       if (!db.objectStoreNames.contains("notif_agendamentos")) {
         db.createObjectStore("notif_agendamentos", { keyPath: "chave" });
+      }
+      // v3: fotos de evidência aguardando upload — sobrevivem a queda de sinal
+      // e a kills de memória do Android
+      if (!db.objectStoreNames.contains("pending_fotos")) {
+        db.createObjectStore("pending_fotos", { autoIncrement: true });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
@@ -1125,14 +1170,41 @@ async function enfileirarBaixa(contratoId, campos) {
   } catch {}
 }
 
-async function contarFilaBaixas() {
+// Grava as fotos no IDB ANTES de qualquer tentativa de rede. Retorna a chave
+// para removê-las quando o upload confirmar. Enquanto estiverem aqui, a
+// evidência sobrevive a queda de sinal, fechamento do app e kill de memória.
+async function enfileirarFotos(contratoId, arquivos) {
+  if (!arquivos?.length) return null;
   try {
     const db = await abrirIDB();
-    return new Promise((resolve) => {
-      const req = db
-        .transaction("pending_baixas")
-        .objectStore("pending_baixas")
-        .count();
+    return await new Promise((resolve) => {
+      const tx = db.transaction("pending_fotos", "readwrite");
+      const req = tx
+        .objectStore("pending_fotos")
+        .add({ contratoId, blobs: arquivos, ts: Date.now() });
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+      tx.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function removerFotosDaFila(idbKey) {
+  if (idbKey === null || idbKey === undefined) return;
+  try {
+    const db = await abrirIDB();
+    const tx = db.transaction("pending_fotos", "readwrite");
+    tx.objectStore("pending_fotos").delete(idbKey);
+  } catch {}
+}
+
+async function _contarStore(store) {
+  try {
+    const db = await abrirIDB();
+    return await new Promise((resolve) => {
+      const req = db.transaction(store).objectStore(store).count();
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => resolve(0);
     });
@@ -1141,17 +1213,18 @@ async function contarFilaBaixas() {
   }
 }
 
-async function lerFilaBaixas(db) {
+const contarFilaBaixas = () => _contarStore("pending_baixas");
+const contarFilaFotos = () => _contarStore("pending_fotos");
+
+function _lerStore(db, store) {
   return new Promise((resolve) => {
     const lista = [];
-    const req = db
-      .transaction("pending_baixas")
-      .objectStore("pending_baixas")
-      .openCursor();
+    const req = db.transaction(store).objectStore(store).openCursor();
     req.onsuccess = (e) => {
       const cursor = e.target.result;
       if (cursor) {
-        lista.push({ idbKey: cursor.primaryKey, ...cursor.value });
+        // idbKey por último: o registro salvo não pode sobrescrever a chave real
+        lista.push({ ...cursor.value, idbKey: cursor.primaryKey });
         cursor.continue();
       } else {
         resolve(lista);
@@ -1161,28 +1234,62 @@ async function lerFilaBaixas(db) {
   });
 }
 
+const lerFilaBaixas = (db) => _lerStore(db, "pending_baixas");
+const lerFilaFotos = (db) => _lerStore(db, "pending_fotos");
+
+// Falha permanente (não é rede): conta a tentativa e descarta após MAX_TENTATIVAS
+// para o item não travar a fila — e o indicador — indefinidamente.
+const MAX_TENTATIVAS_FILA = 5;
+
+async function _registrarFalhaFila(store, item) {
+  try {
+    const db = await abrirIDB();
+    const { idbKey, ...registro } = item;
+    const tentativas = (registro.tentativas || 0) + 1;
+    const tx = db.transaction(store, "readwrite");
+    const os = tx.objectStore(store);
+    if (tentativas >= MAX_TENTATIVAS_FILA) {
+      os.delete(idbKey);
+      return true; // descartado
+    }
+    os.put({ ...registro, tentativas }, idbKey);
+  } catch {}
+  return false;
+}
+
+// POST cru no GAS — usado pelo salvamento normal e pelos processadores de fila
+async function _postCampos(contratoId, campos) {
+  const fd = new FormData();
+  fd.append(
+    "payload",
+    JSON.stringify({
+      sheet: "SAFRA",
+      keyCol: "CONTRATO",
+      keyVal: contratoId,
+      data: campos,
+    }),
+  );
+  const resp = await fetchComTimeout(GAS_URL, { method: "POST", body: fd });
+  if (!resp.ok) throw new Error(`Erro HTTP ${resp.status}`);
+  const json = await resp.json().catch(() => ({}));
+  if (json.error) throw new Error(json.error);
+}
+
+let _sincronizando = false;
+
 async function processarFilaBaixas() {
-  if (!navigator.onLine) return;
+  if (!navigator.onLine || _sincronizando) return;
   const db = await abrirIDB().catch(() => null);
   if (!db) return;
-  const items = await lerFilaBaixas(db);
-  if (!items.length) return;
+  _sincronizando = true;
+  try {
+    const items = await lerFilaBaixas(db);
 
-  let successes = 0;
-  for (const item of items) {
-    try {
-      const fd = new FormData();
-      fd.append(
-        "payload",
-        JSON.stringify({
-          sheet: "SAFRA",
-          keyCol: "CONTRATO",
-          keyVal: item.contratoId,
-          data: item.campos,
-        }),
-      );
-      const resp = await fetch(GAS_URL, { method: "POST", body: fd });
-      if (resp.ok) {
+    let successes = 0;
+    let descartadas = 0;
+    for (const item of items) {
+      try {
+        await _postCampos(item.contratoId, item.campos);
         await new Promise((res) => {
           const tx = db.transaction("pending_baixas", "readwrite");
           tx.objectStore("pending_baixas").delete(item.idbKey);
@@ -1190,37 +1297,117 @@ async function processarFilaBaixas() {
           tx.onerror = res; // continua mesmo se delete falhar
         });
         successes++;
+      } catch (e) {
+        // Sem internet real: para o loop, tenta tudo de novo na próxima vez
+        if (ehErroDeRede(e)) break;
+        if (await _registrarFalhaFila("pending_baixas", item)) descartadas++;
       }
-    } catch {}
-  }
+    }
 
-  if (successes > 0) {
-    mostrarToast(
-      `${successes} baixa${successes > 1 ? "s" : ""} sincronizada${successes > 1 ? "s" : ""} com sucesso.`,
-      "sucesso",
-    );
-    carregarContratos(); // Atualiza lista com dados reais
+    // Fotos só depois das baixas — o FOTO_EXEC vai na mesma linha
+    const fotosOk = await processarFilaFotos();
+
+    if (successes > 0) {
+      mostrarToast(
+        `${successes} baixa${successes > 1 ? "s" : ""} sincronizada${successes > 1 ? "s" : ""} com sucesso.`,
+        "sucesso",
+      );
+      carregarContratos(); // Atualiza lista com dados reais
+    }
+    if (fotosOk > 0) {
+      mostrarToast(
+        `${fotosOk} envio${fotosOk > 1 ? "s" : ""} de fotos concluído${fotosOk > 1 ? "s" : ""}.`,
+        "sucesso",
+      );
+    }
+    if (descartadas > 0) {
+      mostrarToast(
+        `${descartadas} baixa${descartadas > 1 ? "s" : ""} não pôde ser enviada após várias tentativas. Refaça pelo app.`,
+        "erro",
+      );
+    }
+  } finally {
+    _sincronizando = false;
+    atualizarIndicadorOffline();
   }
-  atualizarIndicadorOffline();
+}
+
+// Sobe as fotos que ficaram na fila (offline ou upload falhado) e grava a URL.
+// Só remove do IDB depois que o FOTO_EXEC foi confirmado na planilha.
+async function processarFilaFotos() {
+  if (!navigator.onLine) return 0;
+  if (CLOUDINARY_CLOUD_NAME === "SEU_CLOUD_NAME") return 0;
+  const db = await abrirIDB().catch(() => null);
+  if (!db) return 0;
+  const items = await lerFilaFotos(db);
+  if (!items.length) return 0;
+
+  let ok = 0;
+  for (const item of items) {
+    try {
+      const url = await uploadTodasFotos(item.blobs);
+      if (!url) {
+        await removerFotosDaFila(item.idbKey); // entrada vazia — descarta
+        continue;
+      }
+      await _postCampos(item.contratoId, { [COL_FOTO]: url });
+      await removerFotosDaFila(item.idbKey);
+      const idx = contratos.findIndex((c) => c.contrato === item.contratoId);
+      if (idx !== -1) contratos[idx].fotoExec = url;
+      ok++;
+    } catch (e) {
+      if (ehErroDeRede(e)) break; // sem internet real — tenta tudo depois
+      if (await _registrarFalhaFila("pending_fotos", item)) {
+        mostrarToast(
+          `Fotos do contrato ${escHtml(item.contratoId)} não puderam ser enviadas. Refaça a foto pelo app.`,
+          "erro",
+        );
+      }
+    }
+  }
+  if (ok > 0) salvarContratosIDB(contratos, tecnicoLogado()?.usuario);
+  return ok;
 }
 
 async function atualizarIndicadorOffline() {
   const banner = document.getElementById("offline-banner");
   if (!banner) return;
+  const elP = document.getElementById("offline-pendentes");
+  const elT = document.getElementById("offline-texto");
+  const elI = document.getElementById("offline-icone");
+
+  const [nBaixas, nFotos] = await Promise.all([
+    contarFilaBaixas(),
+    contarFilaFotos(),
+  ]);
+  const partes = [];
+  if (nBaixas > 0) partes.push(`${nBaixas} baixa${nBaixas > 1 ? "s" : ""}`);
+  if (nFotos > 0) partes.push(`${nFotos} foto${nFotos > 1 ? "s" : ""}`);
+  const resumo = partes.join(" e ");
+
+  const setIcone = (nome) => {
+    if (elI) elI.innerHTML = `<i data-lucide="${nome}" class="icon"></i>`;
+  };
+
   if (!navigator.onLine) {
+    banner.classList.remove("hidden", "offline-banner-pendente");
+    setIcone("wifi-off");
+    if (elT) elT.textContent = "Modo offline";
+    if (elP) elP.textContent = resumo ? ` · ${resumo} na fila` : "";
+  } else if (resumo) {
+    // Online mas ainda há pendências — o técnico precisa saber antes de
+    // encerrar o dia achando que tudo subiu
     banner.classList.remove("hidden");
-    const n = await contarFilaBaixas();
-    const elP = document.getElementById("offline-pendentes");
-    if (elP) {
-      elP.textContent =
-        n > 0
-          ? ` · ${n} baixa${n > 1 ? "s" : ""} pendente${n > 1 ? "s" : ""}`
-          : "";
-    }
-    renderIcons();
+    banner.classList.add("offline-banner-pendente");
+    setIcone("cloud-upload");
+    if (elT) elT.textContent = "Enviando";
+    if (elP) elP.textContent = ` · ${resumo} na fila`;
   } else {
     banner.classList.add("hidden");
+    banner.classList.remove("offline-banner-pendente");
+    return;
   }
+  renderIcons();
 }
 
 // =========================================
@@ -1327,8 +1514,15 @@ function iniciarApp() {
     document.getElementById("btn-meu-historico").classList.remove("hidden");
   }
 
+  // Reabrir o app também tenta esvaziar a fila — não depende do evento "online",
+  // que não dispara se o app foi fechado enquanto estava sem sinal
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) processarFilaBaixas();
+  });
+
   configurarEventos();
   atualizarIndicadorOffline();
+  processarFilaBaixas();
   iniciarHeartbeat();
   carregarContratos();
 }
@@ -1389,7 +1583,7 @@ async function _fetchContratos(usuario, silencioso) {
     if (tecnico?.cidades?.length) {
       url += `&usuario=${encodeURIComponent(tecnico.usuario)}&cidades=${encodeURIComponent(tecnico.cidades.join(","))}`;
     }
-    const resposta = await fetch(url);
+    const resposta = await fetchComTimeout(url);
     if (!resposta.ok) throw new Error(`Erro HTTP ${resposta.status}`);
     const resJson = await resposta.json();
     if (resJson.error) throw new Error(resJson.error);
@@ -1435,20 +1629,15 @@ async function salvarNaPlanilha(contrato, campos) {
   }
   _setCarregando(+1);
   try {
-    const fd = new FormData();
-    fd.append(
-      "payload",
-      JSON.stringify({
-        sheet: "SAFRA",
-        keyCol: "CONTRATO",
-        keyVal: contrato.contrato,
-        data: campos,
-      }),
-    );
-    const resp = await fetch(GAS_URL, { method: "POST", body: fd });
-    if (!resp.ok) throw new Error(`Erro HTTP ${resp.status}`);
-    const json = await resp.json();
-    if (json.error) throw new Error(json.error);
+    await _postCampos(contrato.contrato, campos);
+  } catch (e) {
+    // Timeout ou falha de conexão: `navigator.onLine` mentiu (sinal fraco).
+    // Trata como offline em vez de perder a baixa.
+    if (ehErroDeRede(e)) {
+      await enfileirarBaixa(contrato.contrato, campos);
+      throw new OfflineError("Conexão instável — baixa enfileirada");
+    }
+    throw e;
   } finally {
     _setCarregando(-1);
   }
@@ -2400,9 +2589,7 @@ async function confirmarRetirado() {
   const isParcial =
     listaSer.length > 0 && qtdSel > 0 && qtdSel < listaSer.length;
   const novoStatus = isParcial ? "Parcial" : "Retirado";
-  const codigoOS = isParcial
-    ? `Parcial - ${qtdSel} de ${listaSer.length} equipamentos retirados`
-    : "430 - Equipamento retirado";
+  const codigoOS = isParcial ? "Parcial" : "430 - Equipamento retirado";
   await executarSalvamento(
     {
       STATUS: novoStatus,
@@ -2493,6 +2680,19 @@ async function executarSalvamento(camposBase, novoStatus) {
   const usuarioAtual = tecnicoLogado()?.usuario;
   salvarContratosIDB(contratos, usuarioAtual);
 
+  // Fotos vão para o IDB ANTES de qualquer rede. Se a conexão cair, o upload
+  // falhar ou o Android matar o app, a evidência continua no aparelho e é
+  // reenviada sozinha. Só sai da fila com o FOTO_EXEC confirmado na planilha.
+  const temCloudinary = CLOUDINARY_CLOUD_NAME !== "SEU_CLOUD_NAME";
+  let fotosKey = null;
+  if (temCloudinary && fotosParaUpload.length) {
+    fotosKey = await enfileirarFotos(
+      contratoParaSalvar.contrato,
+      fotosParaUpload,
+    );
+    atualizarIndicadorOffline();
+  }
+
   // GPS + escrita GAS em background — loading bar indica progresso
   _setCarregando(+1);
   try {
@@ -2518,31 +2718,36 @@ async function executarSalvamento(camposBase, novoStatus) {
     mostrarToast("Baixa registrada com sucesso.", "sucesso");
 
     // 2. Upload de foto em background verdadeiro — não trava a UI nem o loading bar
-    if (
-      CLOUDINARY_CLOUD_NAME !== "SEU_CLOUD_NAME" &&
-      fotosParaUpload.length &&
-      navigator.onLine
-    ) {
+    if (fotosKey !== null) {
       uploadTodasFotos(fotosParaUpload)
         .then(async (fotoExec) => {
-          if (!fotoExec) return;
-          await salvarNaPlanilha(contratoParaSalvar, { [COL_FOTO]: fotoExec });
+          if (!fotoExec) {
+            await removerFotosDaFila(fotosKey);
+            return;
+          }
+          await _postCampos(contratoParaSalvar.contrato, {
+            [COL_FOTO]: fotoExec,
+          });
+          await removerFotosDaFila(fotosKey);
           if (idx !== -1) contratos[idx].fotoExec = fotoExec;
           salvarContratosIDB(contratos, usuarioAtual);
         })
-        .catch((e) => {
-          const motivo = e?.message || "erro de conexão";
+        .catch(() => {
+          // Fotos seguem na fila do IDB — nada se perde, reenvio automático
           mostrarToast(
-            `Fotos não enviadas: ${motivo}. A baixa foi registrada normalmente.`,
+            "Fotos não enviadas agora. Ficaram salvas no aparelho e sobem sozinhas quando o sinal melhorar.",
             "aviso",
           );
-        });
+        })
+        .finally(atualizarIndicadorOffline);
     }
   } catch (erro) {
     if (erro instanceof OfflineError) {
       if (idx !== -1) contratos[idx]._pendente = true;
       mostrarToast(
-        "Sem conexão. Baixa salva localmente e será enviada ao reconectar.",
+        fotosKey !== null
+          ? "Sem conexão. Baixa e fotos salvas no aparelho — serão enviadas ao reconectar."
+          : "Sem conexão. Baixa salva localmente e será enviada ao reconectar.",
         "aviso",
       );
       atualizarIndicadorOffline();
@@ -2552,8 +2757,14 @@ async function executarSalvamento(camposBase, novoStatus) {
       if (idx !== -1 && contratoOriginal) contratos[idx] = contratoOriginal;
       aplicarFiltros();
       salvarContratosIDB(contratos, usuarioAtual); // reverte IDB também
+      // A baixa inteira falhou — fotos órfãs num contrato Pendente não servem
+      // de evidência e travariam a fila para sempre
+      await removerFotosDaFila(fotosKey);
+      atualizarIndicadorOffline();
       mostrarToast(
-        "Erro ao salvar. Verifique sua conexão e tente novamente.",
+        fotosKey !== null
+          ? "Erro ao salvar. Nada foi registrado — refaça a baixa com as fotos."
+          : "Erro ao salvar. Verifique sua conexão e tente novamente.",
         "erro",
       );
     }
@@ -2634,9 +2845,10 @@ async function uploadFoto(file) {
   const form = new FormData();
   form.append("file", file);
   form.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-  const resp = await fetch(
+  const resp = await fetchComTimeout(
     `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
     { method: "POST", body: form },
+    UPLOAD_TIMEOUT_MS,
   );
   if (!resp.ok) throw new Error("Falha no upload da foto");
   const json = await resp.json();
@@ -3260,7 +3472,7 @@ function renderizarAdmin() {
 
 async function carregarPresenca() {
   try {
-    const resp = await fetch(`${GAS_URL}?action=presenca`);
+    const resp = await fetchComTimeout(`${GAS_URL}?action=presenca`);
     const json = await resp.json();
     return Array.isArray(json.data) ? json.data : [];
   } catch {
