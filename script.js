@@ -4,7 +4,7 @@
 // URL gerada ao implantar gas/Codigo.gs como App da Web no Google Apps Script
 // Ver instruções em gas/Codigo.gs
 const GAS_URL =
-  "https://script.google.com/macros/s/AKfycbwvgLR9qWWaeogxhlEZFzcOp5MYsFZ4t9KF2cfwqYWrN3TEspa7GRvSjhtRH9LuHCRp/exec";
+  "https://script.google.com/macros/s/AKfycbwHN69UJbM7ueNyBnXLSlSvauEe1plZ43XfZdd2fTmSlAj0ePvabXk327oYF4tMIA/exec";
 
 // Cloudinary — upload de fotos (plano gratuito: 25GB storage)
 // Como configurar: ver instruções abaixo de CLOUDINARY_UPLOAD_PRESET
@@ -2067,7 +2067,9 @@ function _equipRetirados(c) {
 // A baixa é do técnico filtrado? Sem filtro, qualquer baixa serve.
 function _baixaDoTecnico(c, tecnico) {
   if (!tecnico) return true;
-  return (c.tecnicoExec || "").trim().toLowerCase() === tecnico.trim().toLowerCase();
+  return (
+    (c.tecnicoExec || "").trim().toLowerCase() === tecnico.trim().toLowerCase()
+  );
 }
 
 // O período filtra pela DATA_EXEC — ou seja, restringe as BAIXAS. Contratos ainda
@@ -4610,9 +4612,8 @@ function renderizarDistribuirHTML() {
   const busca = document.getElementById("dist-busca")?.value || "";
 
   // Técnicos válidos vêm da aba TECNICOS — nunca digitados à mão
-  const tecnicos = (todosOsTecnicos.length
-    ? todosOsTecnicos
-    : _lerTecnicosCache()
+  const tecnicos = (
+    todosOsTecnicos.length ? todosOsTecnicos : _lerTecnicosCache()
   )
     .filter((t) => t["USUARIO"])
     .sort((a, b) =>
@@ -4716,8 +4717,7 @@ function filtroDistAlterado(limpouCidade) {
     const el = document.getElementById(foco);
     if (el) {
       el.focus();
-      if (foco === "dist-busca" && pos != null)
-        el.setSelectionRange(pos, pos);
+      if (foco === "dist-busca" && pos != null) el.setSelectionRange(pos, pos);
     }
   }
 }
