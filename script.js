@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "3.1";
+const APP_VERSION = "3.2";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -472,7 +472,8 @@ function ativarLocalizacao() {
   const btn = document.getElementById("btn-localizacao");
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "Localizando...";
+    btn.innerHTML = `<i data-lucide="loader" class="icon icon-sm"></i> Localizando...`;
+    renderIcons();
   }
 
   // Limpa cache de geocoding para reprocessar com o novo formato de query
@@ -500,13 +501,13 @@ function atualizarBtnLocalizacao() {
   const btn = document.getElementById("btn-localizacao");
   if (!btn) return;
   btn.disabled = false;
-  if (userLocation) {
-    btn.textContent = "Localização ativa";
-    btn.classList.add("btn-loc-ativo");
-  } else {
-    btn.textContent = "Localização";
-    btn.classList.remove("btn-loc-ativo");
-  }
+  // innerHTML, não textContent: o botão tem ícone e textContent o apagaria
+  const ativo = !!userLocation;
+  btn.innerHTML = `<i data-lucide="crosshair" class="icon icon-sm"></i> ${
+    ativo ? "Localização ativa" : "Localização"
+  }`;
+  btn.classList.toggle("btn-loc-ativo", ativo);
+  renderIcons();
 }
 
 function atualizarProgressoGeocode(feito, total) {
@@ -2003,8 +2004,9 @@ function extrairNovoEndereco(obs2) {
 //
 // Fórmula:
 //   numerador   = equipamentos retirados (nas baixas que passam nos filtros)
-//   denominador = numerador + equipamentos de contratos NÃO recuperados
-//                 (status diferente de Retirado e Parcial)
+//   denominador = numerador + equipamentos ainda em aberto, que são:
+//                 - contratos não recuperados (status ≠ Retirado/Parcial), e
+//                 - o saldo das Parciais (QNTD menos o que já foi retirado)
 //
 // Contratos recuperados por OUTRO técnico saem dos dois lados quando há um
 // técnico selecionado — não é trabalho dele nem trabalho que sobrou.
@@ -2109,7 +2111,10 @@ function calcularMetaEquipamentos(cidadeFiltro) {
       )
         return;
       ret = _equipRetirados(c);
-      tot = ret;
+      // Numa Parcial, o que ficou no cliente continua sendo trabalho em aberto e
+      // segue no denominador — senão 1 de 3 equipamentos apareceria como 100%.
+      // O max também protege contra SERIAIS_RETIRADOS com mais itens que QNTD.
+      tot = Math.max(ret, _equipTotal(c));
     } else {
       // Não recuperado: entra só no denominador, é o que falta fazer
       tot = _equipTotal(c);

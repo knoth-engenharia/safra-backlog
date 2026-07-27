@@ -134,26 +134,6 @@
             <select id="filter-tecnico" class="input-select hidden">
               <option value="">Técnico</option>
             </select>
-            <div class="filtro-range">
-              <div class="filtro-range-campos">
-                <label class="filtro-range-campo">
-                  <span>De</span>
-                  <input
-                    type="date"
-                    id="filter-data-ini"
-                    class="input-select"
-                  />
-                </label>
-                <label class="filtro-range-campo">
-                  <span>Até</span>
-                  <input
-                    type="date"
-                    id="filter-data-fim"
-                    class="input-select"
-                  />
-                </label>
-              </div>
-            </div>
             <select id="filter-distancia" class="input-select">
               <option value="">Distância</option>
               <option value="mais-perto">Mais perto</option>
@@ -161,24 +141,6 @@
               <option value="1km">Até 1km</option>
               <option value="5km">Até 5km</option>
               <option value="10km">Até 10km</option>
-            </select>
-            <button id="btn-localizacao" class="input-select btn-filtro-acao">
-              Localização
-            </button>
-            <button id="btn-montar-rota" class="input-select btn-filtro-acao">
-              Rota
-            </button>
-            <button id="btn-agrupar" class="input-select btn-filtro-acao">
-              Por rua
-            </button>
-            <select
-              id="sort-rua"
-              class="input-select hidden"
-              onchange="alterarSortRua(this.value)"
-            >
-              <option value="az">A–Z</option>
-              <option value="mais">Mais contratos</option>
-              <option value="menos">Menos contratos</option>
             </select>
             <select
               id="sort-qntd"
@@ -189,7 +151,46 @@
               <option value="mais">Mais equipamentos</option>
               <option value="menos">Menos equipamentos</option>
             </select>
+            <select
+              id="sort-rua"
+              class="input-select hidden"
+              onchange="alterarSortRua(this.value)"
+            >
+              <option value="az">A–Z</option>
+              <option value="mais">Mais contratos</option>
+              <option value="menos">Menos contratos</option>
+            </select>
           </div>
+
+          <!-- Intervalo de datas: linha inteira, senão os campos ficam
+               espremidos numa coluna do grid -->
+          <div class="filtro-range">
+            <span class="filtro-range-titulo">Entrada no backlog</span>
+            <div class="filtro-range-campos">
+              <label class="filtro-range-campo">
+                <span>De</span>
+                <input type="date" id="filter-data-ini" class="input-select" />
+              </label>
+              <label class="filtro-range-campo">
+                <span>Até</span>
+                <input type="date" id="filter-data-fim" class="input-select" />
+              </label>
+            </div>
+          </div>
+
+          <!-- Ações: mudam o modo da lista, não filtram — separadas de propósito -->
+          <div class="filtro-acoes">
+            <button id="btn-localizacao" class="btn-filtro-acao">
+              <i data-lucide="crosshair" class="icon icon-sm"></i> Localização
+            </button>
+            <button id="btn-montar-rota" class="btn-filtro-acao">
+              <i data-lucide="route" class="icon icon-sm"></i> Rota
+            </button>
+            <button id="btn-agrupar" class="btn-filtro-acao">
+              <i data-lucide="layers" class="icon icon-sm"></i> Por rua
+            </button>
+          </div>
+
           <button id="btn-limpar-filtros" class="btn-limpar-filtros">
             Limpar filtros
           </button>
