@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "2.6";
+const APP_VERSION = "2.7";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -1549,7 +1549,9 @@ function preencherFiltros() {
   aplicarFiltros();
 }
 
-function atualizarBairros(cidadeSel = document.getElementById("filter-cidade").value) {
+function atualizarBairros(
+  cidadeSel = document.getElementById("filter-cidade").value,
+) {
   const normalizar = (s) => (s || "").trim().toLowerCase();
   const fonte = cidadeSel
     ? contratos.filter((c) => normalizar(c.cidade) === normalizar(cidadeSel))
