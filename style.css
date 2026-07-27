@@ -2313,11 +2313,66 @@ body {
 .meta-verde       { background: #16a34a; }
 
 /* ----- Modal de detalhe ----- */
+.meta-recorte {
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: rgba(255,255,255,0.22);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 6px;
+}
 .meta-legenda {
   font-size: 0.78rem;
   color: #6b7280;
   margin-bottom: 14px;
+  line-height: 1.5;
 }
+.meta-filtros {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.meta-filtro-datas { display: flex; gap: 10px; }
+.meta-filtro-datas .meta-filtro-campo { flex: 1; min-width: 0; }
+.meta-filtro-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.meta-filtro-campo > span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.meta-filtro-campo .input-select { width: 100%; }
+
+/* ----- Intervalo de datas no painel de filtros da lista ----- */
+.filtro-range { flex: 1 1 100%; }
+.filtro-range-titulo {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 4px;
+}
+.filtro-range-campos { display: flex; gap: 8px; }
+.filtro-range-campo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: #4b5563;
+}
+.filtro-range-campo .input-select { flex: 1; min-width: 0; }
 .meta-cidade { margin-bottom: 16px; }
 .meta-cidade-geral {
   background: #f3f4f6;

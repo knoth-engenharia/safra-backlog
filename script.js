@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "3.0";
+const APP_VERSION = "3.1";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -1584,6 +1584,8 @@ function iniciarApp() {
   // para nomeTecnico() e a aba Distribuir continuarem funcionando após reload
   if (!todosOsTecnicos.length) todosOsTecnicos = _lerTecnicosCache();
 
+  inicializarFiltrosMeta();
+
   configurarEventos();
   atualizarIndicadorOffline();
   processarFilaBaixas();
@@ -1999,11 +2001,17 @@ function extrairNovoEndereco(obs2) {
 // =========================================
 // META DE RECUPERAÇÃO — por EQUIPAMENTO, não por contrato
 //
-// Numerador   = nº de seriais em SERIAIS_RETIRADOS (o campo vem "AAA / BBB")
-// Denominador = soma de QNTD dos contratos da cidade
+// Fórmula:
+//   numerador   = equipamentos retirados (nas baixas que passam nos filtros)
+//   denominador = numerador + equipamentos de contratos NÃO recuperados
+//                 (status diferente de Retirado e Parcial)
 //
-// Depende SÓ do filtro de cidade. Status, bairro e período não entram: a meta
-// é da cidade inteira, não da visão atual — senão o número dançaria a cada filtro.
+// Contratos recuperados por OUTRO técnico saem dos dois lados quando há um
+// técnico selecionado — não é trabalho dele nem trabalho que sobrou.
+//
+// Do filtro da lista, só o de CIDADE entra aqui. Status, bairro e o intervalo de
+// datas da lista não: a meta é da cidade, não da visão atual, senão o número
+// dançaria a cada clique. O painel de meta tem período e técnico próprios.
 // =========================================
 const METAS = { total: 0.78, opcao: 0.9, inad: 0.7 };
 const META_ROTULOS = {
@@ -2011,6 +2019,19 @@ const META_ROTULOS = {
   opcao: "Opção",
   inad: "Inadimplência",
 };
+
+// Filtros próprios do painel de meta (independentes dos filtros da lista)
+let metaTecnico = ""; // "" = todos
+let metaDataIni = "";
+let metaDataFim = "";
+
+// Técnico não-admin começa vendo o próprio desempenho; admin vê o total
+function inicializarFiltrosMeta() {
+  const t = tecnicoLogado();
+  metaTecnico = t && !t.adm ? t.usuario || "" : "";
+  metaDataIni = "";
+  metaDataFim = "";
+}
 
 // Cidades que o técnico realmente atende. Agendamentos cross-cidade entram na
 // lista de contratos mas NÃO contam para a meta dele.
@@ -2024,6 +2045,48 @@ function _grupoVazio() {
   return { ret: 0, tot: 0 };
 }
 
+function _recuperado(c) {
+  return c.status === "Retirado" || c.status === "Parcial";
+}
+
+// Total de equipamentos do contrato. QNTD é a fonte oficial; sem ela, cai para a
+// contagem de TERMINAIS.
+function _equipTotal(c) {
+  return parseInt(c.quantidade) || parsearSeriais(c.terminais).length;
+}
+
+// Equipamentos retirados. Baixas antigas ou feitas na mão às vezes não têm os
+// seriais discriminados — nesse caso assume-se que levou tudo (QNTD). Gera alguma
+// margem de erro, mas evita zerar recuperação que de fato aconteceu.
+function _equipRetirados(c) {
+  return parsearSeriais(c.seriaisRet).length || _equipTotal(c);
+}
+
+// A baixa é do técnico filtrado? Sem filtro, qualquer baixa serve.
+function _baixaDoTecnico(c, tecnico) {
+  if (!tecnico) return true;
+  return (c.tecnicoExec || "").trim().toLowerCase() === tecnico.trim().toLowerCase();
+}
+
+// O período filtra pela DATA_EXEC — ou seja, restringe as BAIXAS. Contratos ainda
+// em aberto não têm data de execução e seguem no denominador independente do
+// período: continuam sendo trabalho a fazer.
+function _baixaNoPeriodo(c, ini, fim) {
+  if (!ini && !fim) return true;
+  const m = /(\d{2})\/(\d{2})\/(\d{4})/.exec(c.dataExec || "");
+  if (!m) return false;
+  const data = new Date(+m[3], +m[2] - 1, +m[1]);
+  let dIni = isoParaDateLocal(ini, false);
+  let dFim = isoParaDateLocal(fim, true);
+  if (dIni && dFim && dIni > dFim) {
+    dIni = isoParaDateLocal(fim, false);
+    dFim = isoParaDateLocal(ini, true);
+  }
+  if (dIni && data < dIni) return false;
+  if (dFim && data > dFim) return false;
+  return true;
+}
+
 function calcularMetaEquipamentos(cidadeFiltro) {
   const acesso = _cidadesPermitidas();
   const alvo = cidadeFiltro?.trim().toLowerCase() || "";
@@ -2035,6 +2098,24 @@ function calcularMetaEquipamentos(cidadeFiltro) {
     if (acesso && !acesso.has(cidadeLow)) return;
     if (alvo && cidadeLow !== alvo) return;
 
+    let ret = 0;
+    let tot = 0;
+    if (_recuperado(c)) {
+      // Só conta se a baixa é do técnico filtrado e caiu no período.
+      // Baixa de outro técnico: sai da conta inteira, não vira "pendente".
+      if (
+        !_baixaDoTecnico(c, metaTecnico) ||
+        !_baixaNoPeriodo(c, metaDataIni, metaDataFim)
+      )
+        return;
+      ret = _equipRetirados(c);
+      tot = ret;
+    } else {
+      // Não recuperado: entra só no denominador, é o que falta fazer
+      tot = _equipTotal(c);
+    }
+    if (!tot) return;
+
     if (!mapa[cidade]) {
       mapa[cidade] = {
         cidade,
@@ -2044,19 +2125,12 @@ function calcularMetaEquipamentos(cidadeFiltro) {
       };
     }
     const g = mapa[cidade];
-
-    const retirados = parsearSeriais(c.seriaisRet).length;
-    // QNTD é a fonte oficial. Quando vem vazia, cai para a contagem de TERMINAIS
-    // — sem isso o contrato entraria no numerador e não no denominador, gerando %
-    // acima de 100.
-    const total = parseInt(c.quantidade) || parsearSeriais(c.terminais).length;
-
-    g.total.ret += retirados;
-    g.total.tot += total;
+    g.total.ret += ret;
+    g.total.tot += tot;
     const cat = categoriaTipo(c);
     if (cat === "opcao" || cat === "inad") {
-      g[cat].ret += retirados;
-      g[cat].tot += total;
+      g[cat].ret += ret;
+      g[cat].tot += tot;
     }
   });
 
@@ -2112,10 +2186,18 @@ function atualizarBarraMeta() {
     : dados.length === 1
       ? escHtml(dados[0].cidade)
       : `${dados.length} cidades`;
+  // Deixa explícito quando a barra está medindo só um técnico ou um período —
+  // senão o número parece "da cidade" e engana
+  const recorte = [
+    metaTecnico ? escHtml(nomeTecnico(metaTecnico) || metaTecnico) : "",
+    metaDataIni || metaDataFim ? "período" : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   el.className = `meta-barra ${classeMeta(pct, METAS.total)}`;
   el.innerHTML = `
-    <span class="meta-escopo"><i data-lucide="target" class="icon icon-sm"></i> ${escopo}</span>
+    <span class="meta-escopo"><i data-lucide="target" class="icon icon-sm"></i> ${escopo}${recorte ? `<span class="meta-recorte">${recorte}</span>` : ""}</span>
     <span class="meta-numeros">${geral.ret}/${geral.tot}</span>
     <span class="meta-pct">(${_fmtPct(pct)})</span>
     <span class="meta-falta">${falta > 0 ? `faltam ${falta}` : "meta batida"}</span>
@@ -2148,32 +2230,106 @@ function _blocoCidadeHTML(d) {
     </div>`;
 }
 
-function abrirMetaDetalhe() {
+// Técnicos que aparecem no seletor do painel: os que têm baixa registrada,
+// mais o logado (que pode ainda não ter nenhuma)
+function _tecnicosComBaixa() {
+  const logado = tecnicoLogado()?.usuario || "";
+  const set = new Set(
+    contratos.map((c) => (c.tecnicoExec || "").trim()).filter(Boolean),
+  );
+  if (logado) set.add(logado);
+  return [...set].sort((a, b) =>
+    (nomeTecnico(a) || a).localeCompare(nomeTecnico(b) || b),
+  );
+}
+
+function _filtrosMetaHTML() {
+  const opts = _tecnicosComBaixa()
+    .map(
+      (u) =>
+        `<option value="${escHtml(u)}"${u === metaTecnico ? " selected" : ""}>${escHtml(nomeTecnico(u) || u)}</option>`,
+    )
+    .join("");
+  return `
+    <div class="meta-filtros">
+      <label class="meta-filtro-campo">
+        <span>Técnico</span>
+        <select id="meta-filter-tecnico" class="input-select" onchange="alterarFiltroMeta()">
+          <option value=""${metaTecnico ? "" : " selected"}>Todos os técnicos</option>
+          ${opts}
+        </select>
+      </label>
+      <div class="meta-filtro-datas">
+        <label class="meta-filtro-campo">
+          <span>Baixas de</span>
+          <input type="date" id="meta-filter-ini" class="input-select"
+                 value="${escHtml(metaDataIni)}" onchange="alterarFiltroMeta()" />
+        </label>
+        <label class="meta-filtro-campo">
+          <span>até</span>
+          <input type="date" id="meta-filter-fim" class="input-select"
+                 value="${escHtml(metaDataFim)}" onchange="alterarFiltroMeta()" />
+        </label>
+      </div>
+      ${
+        metaTecnico || metaDataIni || metaDataFim
+          ? `<button class="btn-subview" onclick="limparFiltrosMeta()">Limpar filtros da meta</button>`
+          : ""
+      }
+    </div>`;
+}
+
+function alterarFiltroMeta() {
+  metaTecnico = document.getElementById("meta-filter-tecnico")?.value ?? "";
+  metaDataIni = document.getElementById("meta-filter-ini")?.value ?? "";
+  metaDataFim = document.getElementById("meta-filter-fim")?.value ?? "";
+  atualizarBarraMeta(); // a barra reflete os mesmos filtros
+  renderizarMetaBody();
+}
+
+function limparFiltrosMeta() {
+  metaTecnico = "";
+  metaDataIni = "";
+  metaDataFim = "";
+  atualizarBarraMeta();
+  renderizarMetaBody();
+}
+
+function renderizarMetaBody() {
   const cidadeFiltro = document.getElementById("filter-cidade")?.value || "";
   const dados = calcularMetaEquipamentos(cidadeFiltro);
-  if (!dados.length) return;
 
-  // Mais de uma cidade: consolidado no topo para não precisar filtrar uma a uma
-  const consolidado =
-    dados.length > 1
-      ? `<div class="meta-cidade meta-cidade-geral">
-           <div class="meta-cidade-nome">Todas as suas cidades</div>
-           ${["total", "opcao", "inad"]
-             .map((k) =>
-               _linhaMetaHTML(META_ROTULOS[k], _somarGrupos(dados, k), METAS[k]),
-             )
-             .join("")}
-         </div>`
-      : "";
+  const corpo = dados.length
+    ? (dados.length > 1
+        ? `<div class="meta-cidade meta-cidade-geral">
+             <div class="meta-cidade-nome">Todas as suas cidades</div>
+             ${["total", "opcao", "inad"]
+               .map((k) =>
+                 _linhaMetaHTML(
+                   META_ROTULOS[k],
+                   _somarGrupos(dados, k),
+                   METAS[k],
+                 ),
+               )
+               .join("")}
+           </div>`
+        : "") + dados.map(_blocoCidadeHTML).join("")
+    : `<div class="estado-vazio"><p>Nada a exibir com esses filtros.</p></div>`;
+
+  const legenda = metaTecnico
+    ? `Equipamentos retirados por <strong>${escHtml(nomeTecnico(metaTecnico) || metaTecnico)}</strong> sobre esses mesmos equipamentos somados ao que ainda está em aberto. Baixas de outros técnicos ficam de fora da conta.`
+    : `Equipamentos retirados sobre esses mesmos equipamentos somados ao que ainda está em aberto.`;
 
   document.getElementById("meta-body").innerHTML = `
-    <p class="meta-legenda">
-      Equipamentos retirados sobre o total de equipamentos da cidade.
-    </p>
-    ${consolidado}
-    ${dados.map(_blocoCidadeHTML).join("")}`;
-  document.getElementById("modal-meta").classList.remove("hidden");
+    ${_filtrosMetaHTML()}
+    <p class="meta-legenda">${legenda}</p>
+    ${corpo}`;
   renderIcons();
+}
+
+function abrirMetaDetalhe() {
+  renderizarMetaBody();
+  document.getElementById("modal-meta").classList.remove("hidden");
 }
 
 function fecharMetaDetalhe() {

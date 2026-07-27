@@ -6,7 +6,10 @@
     <title>Backlog Safra — Retirada de Equipamentos</title>
     <link rel="stylesheet" href="style.css" />
     <link rel="manifest" href="manifest.json" />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
+      defer
+    ></script>
     <meta name="theme-color" content="#0056b3" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -23,7 +26,10 @@
       <div class="header-top">
         <div>
           <h1>Backlog Safra</h1>
-          <p>Retirada de Equipamentos <span id="header-versao" class="header-versao"></span></p>
+          <p>
+            Retirada de Equipamentos
+            <span id="header-versao" class="header-versao"></span>
+          </p>
         </div>
         <div id="header-user" class="header-user hidden">
           <span id="header-nome-tecnico"></span>
@@ -73,7 +79,9 @@
     <main class="container hidden" id="app-principal">
       <!-- Banner offline -->
       <div id="offline-banner" class="offline-banner hidden">
-        <span id="offline-icone"><i data-lucide="wifi-off" class="icon"></i></span>
+        <span id="offline-icone"
+          ><i data-lucide="wifi-off" class="icon"></i
+        ></span>
         <span id="offline-texto">Modo offline</span>
         <span id="offline-pendentes" class="offline-pendentes"></span>
       </div>
@@ -95,67 +103,93 @@
               <i data-lucide="x" class="icon"></i>
             </button>
           </div>
-          <button id="btn-toggle-filtros" class="btn-toggle-filtros" onclick="toggleFiltros()" aria-label="Filtros">
+          <button
+            id="btn-toggle-filtros"
+            class="btn-toggle-filtros"
+            onclick="toggleFiltros()"
+            aria-label="Filtros"
+          >
             <i data-lucide="sliders-horizontal" class="icon icon-sm"></i>
             <span id="badge-filtros-ativos" class="badge-filtros hidden"></span>
           </button>
         </div>
         <div id="filtros-panel" class="filtros-panel hidden">
-        <div class="filter-row">
-          <select id="filter-cidade" class="input-select">
-            <option value="">Cidade</option>
-          </select>
-          <select id="filter-bairro" class="input-select">
-            <option value="">Bairro</option>
-          </select>
-          <select id="filter-status" class="input-select">
-            <option value="">Status</option>
-            <option value="Pendente">Pendente</option>
-            <option value="Retirado">Retirado</option>
-            <option value="Parcial">Parcial</option>
-            <option value="Quebra">Quebra</option>
-          </select>
-          <select id="filter-tipo" class="input-select">
-            <option value="">Tipo</option>
-          </select>
-          <select id="filter-tecnico" class="input-select hidden">
-            <option value="">Técnico</option>
-          </select>
-          <div class="filtro-range">
-            <span class="filtro-range-titulo">Entrada no backlog</span>
-            <div class="filtro-range-campos">
-              <label class="filtro-range-campo">
-                <span>De</span>
-                <input type="date" id="filter-data-ini" class="input-select" />
-              </label>
-              <label class="filtro-range-campo">
-                <span>Até</span>
-                <input type="date" id="filter-data-fim" class="input-select" />
-              </label>
+          <div class="filter-row">
+            <select id="filter-cidade" class="input-select">
+              <option value="">Cidade</option>
+            </select>
+            <select id="filter-bairro" class="input-select">
+              <option value="">Bairro</option>
+            </select>
+            <select id="filter-status" class="input-select">
+              <option value="">Status</option>
+              <option value="Pendente">Pendente</option>
+              <option value="Retirado">Retirado</option>
+              <option value="Parcial">Parcial</option>
+              <option value="Quebra">Quebra</option>
+            </select>
+            <select id="filter-tipo" class="input-select">
+              <option value="">Tipo</option>
+            </select>
+            <select id="filter-tecnico" class="input-select hidden">
+              <option value="">Técnico</option>
+            </select>
+            <div class="filtro-range">
+              <div class="filtro-range-campos">
+                <label class="filtro-range-campo">
+                  <span>De</span>
+                  <input
+                    type="date"
+                    id="filter-data-ini"
+                    class="input-select"
+                  />
+                </label>
+                <label class="filtro-range-campo">
+                  <span>Até</span>
+                  <input
+                    type="date"
+                    id="filter-data-fim"
+                    class="input-select"
+                  />
+                </label>
+              </div>
             </div>
+            <select id="filter-distancia" class="input-select">
+              <option value="">Distância</option>
+              <option value="mais-perto">Mais perto</option>
+              <option value="500m">Até 500m</option>
+              <option value="1km">Até 1km</option>
+              <option value="5km">Até 5km</option>
+              <option value="10km">Até 10km</option>
+            </select>
+            <button id="btn-localizacao" class="input-select btn-filtro-acao">
+              Localização
+            </button>
+            <button id="btn-montar-rota" class="input-select btn-filtro-acao">
+              Rota
+            </button>
+            <button id="btn-agrupar" class="input-select btn-filtro-acao">
+              Por rua
+            </button>
+            <select
+              id="sort-rua"
+              class="input-select hidden"
+              onchange="alterarSortRua(this.value)"
+            >
+              <option value="az">A–Z</option>
+              <option value="mais">Mais contratos</option>
+              <option value="menos">Menos contratos</option>
+            </select>
+            <select
+              id="sort-qntd"
+              class="input-select"
+              onchange="alterarSortQntd(this.value)"
+            >
+              <option value="">Qtd equipamentos</option>
+              <option value="mais">Mais equipamentos</option>
+              <option value="menos">Menos equipamentos</option>
+            </select>
           </div>
-          <select id="filter-distancia" class="input-select">
-            <option value="">Distância</option>
-            <option value="mais-perto">Mais perto</option>
-            <option value="500m">Até 500m</option>
-            <option value="1km">Até 1km</option>
-            <option value="5km">Até 5km</option>
-            <option value="10km">Até 10km</option>
-          </select>
-          <button id="btn-localizacao" class="input-select btn-filtro-acao">Localização</button>
-          <button id="btn-montar-rota" class="input-select btn-filtro-acao">Rota</button>
-          <button id="btn-agrupar" class="input-select btn-filtro-acao">Por rua</button>
-          <select id="sort-rua" class="input-select hidden" onchange="alterarSortRua(this.value)">
-            <option value="az">A–Z</option>
-            <option value="mais">Mais contratos</option>
-            <option value="menos">Menos contratos</option>
-          </select>
-          <select id="sort-qntd" class="input-select" onchange="alterarSortQntd(this.value)">
-            <option value="">Qtd equipamentos</option>
-            <option value="mais">Mais equipamentos</option>
-            <option value="menos">Menos equipamentos</option>
-          </select>
-        </div>
           <button id="btn-limpar-filtros" class="btn-limpar-filtros">
             Limpar filtros
           </button>
@@ -163,7 +197,11 @@
       </section>
 
       <!-- Barra de meta por equipamentos (seriais retirados / QNTD) -->
-      <button id="meta-barra" class="meta-barra hidden" onclick="abrirMetaDetalhe()"></button>
+      <button
+        id="meta-barra"
+        class="meta-barra hidden"
+        onclick="abrirMetaDetalhe()"
+      ></button>
 
       <p class="resultado-count" id="resultado-count">
         Carregando contratos...
@@ -191,7 +229,12 @@
           <option value="Parcial">Parcial</option>
           <option value="Quebra">Quebra</option>
         </select>
-        <input type="text" id="mh-search" class="input-search mh-search-input" placeholder="Buscar contrato ou endereço..." />
+        <input
+          type="text"
+          id="mh-search"
+          class="input-search mh-search-input"
+          placeholder="Buscar contrato ou endereço..."
+        />
       </div>
       <div id="mh-conteudo" class="admin-conteudo"></div>
     </div>
