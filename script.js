@@ -25,7 +25,7 @@ const COL_LNG_EXEC = "LNG_EXEC";
 const COL_MSG_ENVIADA = "MSG_ENVIADA";
 
 const POR_PAGINA = 30;
-const APP_VERSION = "3.2";
+const APP_VERSION = "3.3";
 
 const CODIGOS_QUEBRA = [
   "101 - Endereço Não Localizado",
@@ -45,11 +45,15 @@ const CODIGOS_QUEBRA = [
 // =========================================
 function toTitleCase(str) {
   if (!str?.trim()) return str || "";
-  return str
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return (
+    str
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase()
+      // \p{L} em vez de \b\w: \w é só [A-Za-z0-9_], então "ã" virava fronteira
+      // de palavra e "joão" saía como "JoãO"
+      .replace(/(?:^|[\s'’\-/])\p{L}/gu, (m) => m.toUpperCase())
+  );
 }
 
 function escHtml(s) {
@@ -84,6 +88,46 @@ function _lerTecnicosCache() {
   } catch {
     return [];
   }
+}
+
+// TECNICO_EXEC às vezes grava o NOME e às vezes o LOGIN do técnico. Sem resolver
+// isso, a mesma pessoa vira duas opções de filtro e os contratos ficam divididos.
+// Devolve sempre o login em minúsculas; se o valor não estiver na aba TECNICOS,
+// devolve ele mesmo normalizado (nunca some do filtro).
+function resolverTecnico(valor) {
+  const v = (valor || "").trim().toLowerCase();
+  if (!v) return "";
+  const t = todosOsTecnicos.find(
+    (x) =>
+      (x["USUARIO"] || "").trim().toLowerCase() === v ||
+      (x["NOME"] || "").trim().toLowerCase() === v,
+  );
+  return t ? (t["USUARIO"] || "").trim().toLowerCase() : v;
+}
+
+// O contrato é do técnico? Compara pelo login canônico dos dois lados.
+function contratoDoTecnico(c, tecnico) {
+  if (!tecnico) return true;
+  const alvo = resolverTecnico(tecnico);
+  return (
+    resolverTecnico(c.tecnicoDesig) === alvo ||
+    resolverTecnico(c.tecnicoExec) === alvo
+  );
+}
+
+// Opções de técnico a partir dos contratos: chave = login canônico, rótulo = nome
+function opcoesTecnicos(lista, campos = ["tecnicoDesig", "tecnicoExec"]) {
+  const mapa = new Map();
+  lista.forEach((c) => {
+    campos.forEach((campo) => {
+      const chave = resolverTecnico(c[campo]);
+      if (chave && !mapa.has(chave))
+        mapa.set(chave, nomeTecnico(chave) || chave);
+    });
+  });
+  return [...mapa.entries()]
+    .map(([valor, label]) => ({ valor, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 function nomeTecnico(usuario) {
@@ -350,252 +394,6 @@ function criarVisitasHTML(visitas) {
 }
 
 // =========================================
-// GEOLOCALIZAÇÃO — distância até contratos
-// =========================================
-function haversineKm(lat1, lng1, lat2, lng2) {
-  const R = 6371;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function formatarDistancia(km) {
-  if (km < 1) return `${Math.round(km * 1000)}m`;
-  return `${km.toFixed(1).replace(".", ",")} km`;
-}
-
-function lerCacheGeocode() {
-  try {
-    return JSON.parse(sessionStorage.getItem(GEOCODE_CACHE_KEY)) || {};
-  } catch {
-    return {};
-  }
-}
-
-function salvarCacheGeocode(cache) {
-  try {
-    sessionStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(cache));
-  } catch {}
-}
-
-// Expande abreviações comuns em endereços brasileiros (com e sem ponto)
-function expandirAbreviaturas(end) {
-  // Padrão: prefixo (com ou sem ponto) seguido de espaço e letra
-  const sub = (re, rep) => end.replace(re, rep);
-  end = sub(/\bR\.?\s+(?=[A-ZÀ-ÿ])/gi, "Rua ");
-  end = sub(/\bAV\.?\s+(?=[A-ZÀ-ÿ])/gi, "Avenida ");
-  end = sub(/\bAL\.?\s+(?=[A-ZÀ-ÿ])/gi, "Alameda ");
-  end = sub(/\bTV\.?\s+(?=[A-ZÀ-ÿ])/gi, "Travessa ");
-  end = sub(/\bTRAV\.?\s+(?=[A-ZÀ-ÿ])/gi, "Travessa ");
-  end = sub(/\bPC\.?\s+(?=[A-ZÀ-ÿ])/gi, "Praça ");
-  end = sub(/\bPCA\.?\s+(?=[A-ZÀ-ÿ])/gi, "Praça ");
-  end = sub(/\bEST\.?\s+(?=[A-ZÀ-ÿ])/gi, "Estrada ");
-  end = sub(/\bROD\.?\s+(?=[A-ZÀ-ÿ])/gi, "Rodovia ");
-  end = sub(/\bCONJ\.?\s+(?=[A-ZÀ-ÿ])/gi, "Conjunto ");
-  return end;
-}
-
-// Remove sufixo "- BAIRRO" comum em dados de telecom: "Rua X, 123 - Jardim Y"
-function limparSufixoBairro(end) {
-  return end.replace(/\s*-\s*[^,]+$/, "").trim();
-}
-
-// Chave de cache usa só a rua (sem número) para maximizar reuso
-function enderecoParaChaveGeocode(endereco, cidade) {
-  const rua = endereco
-    .replace(/,?\s*n[ºo°]?\s*\d+.*/i, "")
-    .replace(/,?\s*\d+\s*$/, "")
-    .trim();
-  return `${rua}, ${cidade}`.toLowerCase();
-}
-
-// Throttle: Nominatim exige no máximo 1 req/segundo
-let _geocodeLastTs = 0;
-async function _geocodeFetch(url) {
-  const agora = Date.now();
-  const espera = Math.max(0, _geocodeLastTs + 1150 - agora);
-  if (espera > 0) await new Promise((r) => setTimeout(r, espera));
-  _geocodeLastTs = Date.now();
-  return fetch(url, {
-    headers: {
-      "Accept-Language": "pt-BR,pt",
-      "User-Agent": "BacklogSafra/1.0 (internal)",
-    },
-  });
-}
-
-async function geocodificarEndereco(endereco, cidade) {
-  const cache = lerCacheGeocode();
-  const chave = enderecoParaChaveGeocode(endereco, cidade);
-  if (cache[chave]) return cache[chave];
-
-  // Limpa e expande o endereço antes de consultar
-  const endLimpo = expandirAbreviaturas(limparSufixoBairro(endereco));
-
-  // Tentativa 1: endereço completo com número + cidade
-  const q1 = encodeURIComponent(`${endLimpo}, ${cidade}, Brasil`);
-  // Tentativa 2: só rua sem número + cidade (fallback)
-  const ruaSemNumero = endLimpo.replace(/,?\s*\d+.*$/, "").trim();
-  const q2 = encodeURIComponent(`${ruaSemNumero}, ${cidade}, Brasil`);
-
-  async function tentarGeocode(q) {
-    const resp = await _geocodeFetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=1&countrycodes=br`,
-    );
-    const json = await resp.json();
-    return json.length > 0
-      ? { lat: parseFloat(json[0].lat), lng: parseFloat(json[0].lon) }
-      : null;
-  }
-
-  try {
-    let coords = await tentarGeocode(q1);
-    if (!coords) coords = await tentarGeocode(q2);
-    if (coords) {
-      cache[chave] = coords;
-      salvarCacheGeocode(cache);
-      return coords;
-    }
-  } catch {}
-  return null;
-}
-
-function ativarLocalizacao() {
-  if (!navigator.geolocation) {
-    mostrarToast("Geolocalização não suportada neste dispositivo.", "erro");
-    return;
-  }
-  const btn = document.getElementById("btn-localizacao");
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `<i data-lucide="loader" class="icon icon-sm"></i> Localizando...`;
-    renderIcons();
-  }
-
-  // Limpa cache de geocoding para reprocessar com o novo formato de query
-  try {
-    sessionStorage.removeItem(GEOCODE_CACHE_KEY);
-  } catch {}
-  contratoDistancias.clear();
-
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      atualizarBtnLocalizacao();
-      mostrarToast("Localização ativa. Calculando distâncias...", "sucesso");
-      aplicarFiltros();
-    },
-    () => {
-      atualizarBtnLocalizacao();
-      mostrarToast("Não foi possível obter sua localização.", "erro");
-    },
-    { timeout: 10000, enableHighAccuracy: true },
-  );
-}
-
-function atualizarBtnLocalizacao() {
-  const btn = document.getElementById("btn-localizacao");
-  if (!btn) return;
-  btn.disabled = false;
-  // innerHTML, não textContent: o botão tem ícone e textContent o apagaria
-  const ativo = !!userLocation;
-  btn.innerHTML = `<i data-lucide="crosshair" class="icon icon-sm"></i> ${
-    ativo ? "Localização ativa" : "Localização"
-  }`;
-  btn.classList.toggle("btn-loc-ativo", ativo);
-  renderIcons();
-}
-
-function atualizarProgressoGeocode(feito, total) {
-  const el = document.getElementById("geocode-progress");
-  if (!el) return;
-  if (feito >= total) {
-    el.classList.add("hidden");
-  } else {
-    el.textContent = `Calculando distâncias: ${feito}/${total}`;
-    el.classList.remove("hidden");
-  }
-}
-
-async function calcularDistanciasPagina(paginaContratos) {
-  if (!userLocation || geocodificandoAtivo) return;
-  geocodificandoAtivo = true;
-  let houveMudanca = false;
-  const cache = lerCacheGeocode();
-  const chavesProcessadas = new Set();
-
-  // Conta quantos precisam de requisição HTTP (não estão no cache)
-  const pendentes = paginaContratos.filter((c) => {
-    const novoEnd = extrairNovoEndereco(c.obs2);
-    const chave = enderecoParaChaveGeocode(novoEnd || c.endereco, c.cidade);
-    return !contratoDistancias.has(c.id) && !cache[chave];
-  });
-  let feito = 0;
-  const totalPendentes = pendentes.length;
-  if (totalPendentes > 0) atualizarProgressoGeocode(0, totalPendentes);
-
-  for (const c of paginaContratos) {
-    if (contratoDistancias.has(c.id)) continue;
-    const novoEnd = extrairNovoEndereco(c.obs2);
-    const end = novoEnd || c.endereco;
-    const chave = enderecoParaChaveGeocode(end, c.cidade);
-
-    // Cache hit — instantâneo
-    if (cache[chave]) {
-      const { lat, lng } = cache[chave];
-      contratoDistancias.set(
-        c.id,
-        haversineKm(userLocation.lat, userLocation.lng, lat, lng),
-      );
-      houveMudanca = true;
-      continue;
-    }
-
-    if (!chavesProcessadas.has(chave)) {
-      chavesProcessadas.add(chave);
-      const coords = await geocodificarEndereco(end, c.cidade);
-      if (coords) {
-        const km = haversineKm(
-          userLocation.lat,
-          userLocation.lng,
-          coords.lat,
-          coords.lng,
-        );
-        contratoDistancias.set(c.id, km);
-        houveMudanca = true;
-      }
-      feito++;
-      atualizarProgressoGeocode(feito, totalPendentes);
-      await new Promise((r) => setTimeout(r, 1100)); // Nominatim: 1 req/s
-    }
-  }
-
-  geocodificandoAtivo = false;
-  atualizarProgressoGeocode(totalPendentes, totalPendentes);
-  if (houveMudanca) aplicarFiltros();
-}
-
-function criarBadgeDistancia(c) {
-  if (!userLocation) return "";
-  const km = contratoDistancias.get(c.id);
-  if (km === undefined)
-    return `<span class="badge-dist badge-dist-calc" title="Calculando...">…</span>`;
-  return `<span class="badge-dist" title="Distância estimada">${formatarDistancia(km)}</span>`;
-}
-
-function filtrarPorDistancia(c, distFiltro) {
-  if (!distFiltro || distFiltro === "mais-perto" || !userLocation) return true;
-  const km = contratoDistancias.get(c.id);
-  if (km === undefined) return true; // ainda não geocodificado — inclui por padrão
-  const limites = { "500m": 0.5, "1km": 1, "5km": 5, "10km": 10 };
-  return km <= (limites[distFiltro] ?? Infinity);
-}
-
-// =========================================
 // MONTAGEM DE ROTA
 // =========================================
 function toggleModoRota() {
@@ -699,11 +497,37 @@ function alterarSortQntd(valor) {
   aplicarFiltros();
 }
 
+// Expande abreviaturas de logradouro para "R 5 de Maio" e "Rua 5 de Maio"
+// caírem no mesmo grupo. O lookahead aceita dígito de propósito — sem isso
+// "R 5 de Maio" não seria expandido.
+function expandirAbreviaturas(end) {
+  const sub = (re, rep) => (end = end.replace(re, rep));
+  sub(/\bR\.?\s+(?=[A-ZÀ-ÿ0-9])/gi, "Rua ");
+  sub(/\bAV\.?\s+(?=[A-ZÀ-ÿ0-9])/gi, "Avenida ");
+  sub(/\bAL\.?\s+(?=[A-ZÀ-ÿ0-9])/gi, "Alameda ");
+  sub(/\bTRAV\.?\s+(?=[A-ZÀ-ÿ0-9])/gi, "Travessa ");
+  sub(/\bTV\.?\s+(?=[A-ZÀ-ÿ0-9])/gi, "Travessa ");
+  sub(/\bPCA\.?\s+(?=[A-ZÀ-ÿ0-9])/gi, "Praça ");
+  sub(/\bPC\.?\s+(?=[A-ZÀ-ÿ0-9])/gi, "Praça ");
+  sub(/\bEST\.?\s+(?=[A-ZÀ-ÿ0-9])/gi, "Estrada ");
+  sub(/\bROD\.?\s+(?=[A-ZÀ-ÿ0-9])/gi, "Rodovia ");
+  sub(/\bCONJ\.?\s+(?=[A-ZÀ-ÿ0-9])/gi, "Conjunto ");
+  return end;
+}
+
+// Só o prefixo, sem nome — sinal de que o número faz parte do nome da rua
+const PREFIXO_LOGRADOURO =
+  /^(rua|avenida|alameda|travessa|pra[çc]a|estrada|rodovia|conjunto|largo|via)\.?$/i;
+
 function extrairNomeRua(endereco) {
-  if (!endereco) return "Sem endereço";
-  // Tudo antes do primeiro número de casa ou vírgula
-  const m = endereco.match(/^([^,\d]+)/);
-  return m ? m[1].trim() : endereco;
+  if (!endereco?.trim()) return "Sem endereço";
+  // A vírgula separa a rua do número em endereço brasileiro
+  let base = expandirAbreviaturas(endereco.split(",")[0]).trim();
+  // Remove o número da casa no fim ("Rua das Flores 123", "Rua 5 de Maio 200")
+  const semNumero = base.replace(/\s+\d+\s*[a-zA-Z]?$/, "").trim();
+  // Se sobrou só "Rua"/"Avenida", o número era o nome ("Rua 20") — mantém
+  if (semNumero && !PREFIXO_LOGRADOURO.test(semNumero)) base = semNumero;
+  return base || endereco.trim();
 }
 
 async function registrarTentativa() {
@@ -1481,12 +1305,6 @@ let _connectCampos = []; // campos do último Connect aberto (para copiarTudoCon
 let _fotoArquivos = []; // fotos acumuladas de câmera + galeria
 let paginaAtual = 1;
 
-// Geolocalização
-let userLocation = null; // { lat, lng }
-let contratoDistancias = new Map(); // id → km
-let geocodificandoAtivo = false;
-const GEOCODE_CACHE_KEY = "geocode_cache_v1";
-
 // Rota
 let modoRota = false;
 let rotaSelecionados = new Set(); // Set de contrato.id
@@ -1737,7 +1555,6 @@ function salvarFiltros() {
     tecnico: document.getElementById("filter-tecnico").value,
     dataIni: document.getElementById("filter-data-ini")?.value || "",
     dataFim: document.getElementById("filter-data-fim")?.value || "",
-    distancia: document.getElementById("filter-distancia")?.value || "",
     sortQntd: document.getElementById("sort-qntd")?.value || "",
   };
   localStorage.setItem(FILTROS_KEY, JSON.stringify(f));
@@ -1773,15 +1590,7 @@ function preencherFiltros() {
   // Filtro de técnico: visível apenas para ADMs
   const { adm } = tecnicoLogado() || {};
   if (adm) {
-    const tecnicos = [
-      ...new Set(
-        [
-          ...contratos.map((c) => c.tecnicoDesig),
-          ...contratos.map((c) => c.tecnicoExec),
-        ].filter(Boolean),
-      ),
-    ].sort();
-    preencherSelect("filter-tecnico", tecnicos, "Técnico");
+    preencherSelect("filter-tecnico", opcoesTecnicos(contratos), "Técnico");
     document.getElementById("filter-tecnico").classList.remove("hidden");
     if (saved.tecnico)
       document.getElementById("filter-tecnico").value = saved.tecnico;
@@ -1794,10 +1603,6 @@ function preencherFiltros() {
   if (saved.dataFim) {
     const el = document.getElementById("filter-data-fim");
     if (el) el.value = saved.dataFim;
-  }
-  if (saved.distancia) {
-    const elDist = document.getElementById("filter-distancia");
-    if (elDist) elDist.value = saved.distancia;
   }
   if (saved.sortQntd) {
     const elSq = document.getElementById("sort-qntd");
@@ -1823,13 +1628,15 @@ function atualizarBairros(
   preencherSelect("filter-bairro", bairros, "Bairro");
 }
 
+// Aceita string (valor = rótulo) ou { valor, label } — usado pelo filtro de
+// técnico, onde o valor é o login e o rótulo é o nome de exibição
 function preencherSelect(id, opcoes, placeholder) {
   const select = document.getElementById(id);
   select.innerHTML = `<option value="">${placeholder}</option>`;
   opcoes.forEach((o) => {
     const opt = document.createElement("option");
-    opt.value = o;
-    opt.textContent = o;
+    opt.value = typeof o === "string" ? o : o.valor;
+    opt.textContent = typeof o === "string" ? o : o.label;
     select.appendChild(opt);
   });
 }
@@ -1845,8 +1652,6 @@ function limparFiltros() {
   if (elIni) elIni.value = "";
   const elFim = document.getElementById("filter-data-fim");
   if (elFim) elFim.value = "";
-  const elDist = document.getElementById("filter-distancia");
-  if (elDist) elDist.value = "";
   const elSq = document.getElementById("sort-qntd");
   if (elSq) elSq.value = "";
   sortQntd = "";
@@ -1895,11 +1700,9 @@ function atualizarBadgeFiltros() {
     "filter-tecnico",
     "filter-data-ini",
     "filter-data-fim",
-    "filter-distancia",
     "sort-qntd",
   ];
   let count = ids.filter((id) => document.getElementById(id)?.value).length;
-  if (userLocation) count++;
   if (modoAgrupamento) count++;
   if (count > 0) {
     badge.textContent = count;
@@ -1919,7 +1722,6 @@ function aplicarFiltros() {
   const tecnico = document.getElementById("filter-tecnico").value;
   const dataIni = document.getElementById("filter-data-ini")?.value || "";
   const dataFim = document.getElementById("filter-data-fim")?.value || "";
-  const distFiltro = document.getElementById("filter-distancia")?.value || "";
 
   const { usuario: usuarioLogado, adm: isAdm } = tecnicoLogado() || {};
   const usuarioLow = usuarioLogado?.trim().toLowerCase() || "";
@@ -1945,9 +1747,8 @@ function aplicarFiltros() {
       (skipGeofiltro || !bairro || c.bairro === bairro) &&
       (!status || c.status === status) &&
       (!tipo || c.tipoDesconexao === tipo) &&
-      (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico) &&
-      filtrarPorIntervalo(c, dataIni, dataFim) &&
-      filtrarPorDistancia(c, distFiltro)
+      contratoDoTecnico(c, tecnico) &&
+      filtrarPorIntervalo(c, dataIni, dataFim)
     );
   });
 
@@ -2030,7 +1831,7 @@ let metaDataFim = "";
 // Técnico não-admin começa vendo o próprio desempenho; admin vê o total
 function inicializarFiltrosMeta() {
   const t = tecnicoLogado();
-  metaTecnico = t && !t.adm ? t.usuario || "" : "";
+  metaTecnico = t && !t.adm ? resolverTecnico(t.usuario) : "";
   metaDataIni = "";
   metaDataFim = "";
 }
@@ -2067,9 +1868,8 @@ function _equipRetirados(c) {
 // A baixa é do técnico filtrado? Sem filtro, qualquer baixa serve.
 function _baixaDoTecnico(c, tecnico) {
   if (!tecnico) return true;
-  return (
-    (c.tecnicoExec || "").trim().toLowerCase() === tecnico.trim().toLowerCase()
-  );
+  // resolverTecnico porque TECNICO_EXEC ora tem o login, ora o nome
+  return resolverTecnico(c.tecnicoExec) === resolverTecnico(tecnico);
 }
 
 // O período filtra pela DATA_EXEC — ou seja, restringe as BAIXAS. Contratos ainda
@@ -2240,21 +2040,21 @@ function _blocoCidadeHTML(d) {
 // Técnicos que aparecem no seletor do painel: os que têm baixa registrada,
 // mais o logado (que pode ainda não ter nenhuma)
 function _tecnicosComBaixa() {
-  const logado = tecnicoLogado()?.usuario || "";
-  const set = new Set(
-    contratos.map((c) => (c.tecnicoExec || "").trim()).filter(Boolean),
-  );
-  if (logado) set.add(logado);
-  return [...set].sort((a, b) =>
-    (nomeTecnico(a) || a).localeCompare(nomeTecnico(b) || b),
-  );
+  const opcoes = opcoesTecnicos(contratos, ["tecnicoExec"]);
+  const logado = resolverTecnico(tecnicoLogado()?.usuario);
+  if (logado && !opcoes.some((o) => o.valor === logado)) {
+    opcoes.push({ valor: logado, label: nomeTecnico(logado) || logado });
+    opcoes.sort((a, b) => a.label.localeCompare(b.label));
+  }
+  return opcoes;
 }
 
 function _filtrosMetaHTML() {
+  const selecionado = resolverTecnico(metaTecnico);
   const opts = _tecnicosComBaixa()
     .map(
-      (u) =>
-        `<option value="${escHtml(u)}"${u === metaTecnico ? " selected" : ""}>${escHtml(nomeTecnico(u) || u)}</option>`,
+      (o) =>
+        `<option value="${escHtml(o.valor)}"${o.valor === selecionado ? " selected" : ""}>${escHtml(o.label)}</option>`,
     )
     .join("");
   return `
@@ -2357,17 +2157,9 @@ function renderizarLista(lista) {
     return;
   }
 
-  const distFiltro = document.getElementById("filter-distancia")?.value || "";
   let ordenada;
 
-  if (userLocation && distFiltro === "mais-perto") {
-    // Ordena tudo por distância (sem geocodificados vai ao final)
-    ordenada = [...lista].sort((a, b) => {
-      const da = contratoDistancias.get(a.id) ?? Infinity;
-      const db = contratoDistancias.get(b.id) ?? Infinity;
-      return da - db;
-    });
-  } else if (sortQntd === "mais") {
+  if (sortQntd === "mais") {
     ordenada = [...lista].sort(
       (a, b) => (parseInt(b.quantidade) || 0) - (parseInt(a.quantidade) || 0),
     );
@@ -2449,9 +2241,6 @@ function renderizarLista(lista) {
     });
     renderizarPaginacao(0, 0);
     renderIcons();
-    if (userLocation && !geocodificandoAtivo) {
-      setTimeout(() => calcularDistanciasPagina(ordenada), 100);
-    }
     return;
   }
 
@@ -2479,21 +2268,6 @@ function renderizarLista(lista) {
 
   renderizarPaginacao(totalPags, total);
   renderIcons();
-
-  if (userLocation && !geocodificandoAtivo) {
-    const cidadeFiltrada = document.getElementById("filter-cidade")?.value;
-    if (cidadeFiltrada || ordenada.length <= 150) {
-      // Cidade filtrada ou lista pequena: geocodifica tudo
-      setTimeout(() => calcularDistanciasPagina(ordenada), 100);
-    } else {
-      // Lista grande sem filtro: só a página atual + avisa
-      setTimeout(() => calcularDistanciasPagina(pagina), 100);
-      mostrarToast(
-        "Filtre por cidade para calcular distâncias de todos os contratos.",
-        "aviso",
-      );
-    }
-  }
 }
 
 function renderizarPaginacao(totalPags, total) {
@@ -2651,7 +2425,6 @@ function criarCartaoHTML(c) {
       <div class="cartao-footer">
         <span class="badge-status badge-${cls}">${escHtml(c.status)}</span>
         ${criarBadgeSLA(c)}
-        ${criarBadgeDistancia(c)}
         <span class="cartao-detalhe">${escHtml(c.contrato)}</span>
         ${tipoBadge}
       </div>
@@ -2720,7 +2493,6 @@ function abrirModal(contrato) {
     <div class="modal-status-row">
       <span class="badge-status badge-${cls}">${escHtml(contrato.status)}</span>
       ${criarBadgeSLA(contrato)}
-      ${criarBadgeDistancia(contrato)}
     </div>
 
     ${secao(
@@ -3545,14 +3317,6 @@ const TUTORIAL_PASSOS = [
             💡 <em>Tire a foto do serial do equipamento, geolocalização e tentativa de contato.</em>`,
   },
   {
-    lucideIcon: "navigation",
-    titulo: "Localização e Distâncias",
-    texto: `O botão <strong>Localização</strong> nos filtros ativa o GPS do seu celular.<br/><br/>
-            Com a localização ativa, cada contrato exibe a distância até o endereço (ex: <em>1,2 km</em>), calculada em linha reta.<br/><br/>
-            Você também pode usar o filtro <strong>Distância</strong> para mostrar apenas contratos dentro de um raio (500m, 1km, 5km, 10km).<br/><br/>
-            💡 As distâncias são aproximadas — o trânsito real pode variar.`,
-  },
-  {
     lucideIcon: "route",
     titulo: "Modo Rota",
     texto: `O botão <strong>Rota</strong> ativa um modo especial onde você seleciona os contratos que quer visitar em sequência.<br/><br/>
@@ -3825,16 +3589,8 @@ function preencherFiltrosAdmin() {
   const cidades = [
     ...new Set(contratos.map((c) => c.cidade).filter(Boolean)),
   ].sort();
-  const tecnicos = [
-    ...new Set(
-      [
-        ...contratos.map((c) => c.tecnicoDesig),
-        ...contratos.map((c) => c.tecnicoExec),
-      ].filter(Boolean),
-    ),
-  ].sort();
   preencherSelect("adm-filter-cidade", cidades, "Cidade");
-  preencherSelect("adm-filter-tecnico", tecnicos, "Técnico");
+  preencherSelect("adm-filter-tecnico", opcoesTecnicos(contratos), "Técnico");
 }
 
 function getContratosAdmin() {
@@ -3844,7 +3600,7 @@ function getContratosAdmin() {
   return contratos.filter(
     (c) =>
       (!cidade || c.cidade === cidade) &&
-      (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico) &&
+      contratoDoTecnico(c, tecnico) &&
       filtrarPorPeriodo(c, periodo),
   );
 }
@@ -3855,7 +3611,7 @@ function getContratosAdminSemPeriodo() {
   return contratos.filter(
     (c) =>
       (!cidade || c.cidade === cidade) &&
-      (!tecnico || c.tecnicoDesig === tecnico || c.tecnicoExec === tecnico),
+      contratoDoTecnico(c, tecnico),
   );
 }
 
@@ -5580,22 +5336,6 @@ function configurarEventos() {
     if (el) el.addEventListener("change", filtroAlterado);
   });
 
-  const elDist = document.getElementById("filter-distancia");
-  if (elDist) {
-    elDist.addEventListener("change", (e) => {
-      if (e.target.value && !userLocation) {
-        mostrarToast(
-          "Ative a localização para usar o filtro de distância.",
-          "aviso",
-        );
-      }
-      filtroAlterado();
-    });
-  }
-
-  document
-    .getElementById("btn-localizacao")
-    ?.addEventListener("click", ativarLocalizacao);
   document
     .getElementById("btn-montar-rota")
     ?.addEventListener("click", toggleModoRota);

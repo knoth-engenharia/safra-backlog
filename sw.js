@@ -2,7 +2,7 @@
 // SERVICE WORKER — Backlog Safra v3
 // Incrementar CACHE_NAME para forçar atualização
 // =============================================
-const CACHE_NAME = "backlog-safra-v8";
+const CACHE_NAME = "backlog-safra-v9";
 
 const STATIC_ASSETS = [
   "./",
@@ -118,7 +118,6 @@ self.addEventListener("fetch", (e) => {
   const networkOnly = [
     "script.google.com", // Google Apps Script — dados da planilha
     "api.imgbb.com", // upload de fotos
-    "nominatim.openstreetmap.org", // geocoding
   ];
   if (networkOnly.some((host) => url.hostname === host)) return;
 

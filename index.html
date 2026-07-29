@@ -134,14 +134,6 @@
             <select id="filter-tecnico" class="input-select hidden">
               <option value="">Técnico</option>
             </select>
-            <select id="filter-distancia" class="input-select">
-              <option value="">Distância</option>
-              <option value="mais-perto">Mais perto</option>
-              <option value="500m">Até 500m</option>
-              <option value="1km">Até 1km</option>
-              <option value="5km">Até 5km</option>
-              <option value="10km">Até 10km</option>
-            </select>
             <select
               id="sort-qntd"
               class="input-select"
@@ -179,9 +171,6 @@
 
           <!-- Ações: mudam o modo da lista, não filtram — separadas de propósito -->
           <div class="filtro-acoes">
-            <button id="btn-localizacao" class="btn-filtro-acao">
-              <i data-lucide="crosshair" class="icon icon-sm"></i> Localização
-            </button>
             <button id="btn-montar-rota" class="btn-filtro-acao">
               <i data-lucide="route" class="icon icon-sm"></i> Rota
             </button>
@@ -206,7 +195,6 @@
       <p class="resultado-count" id="resultado-count">
         Carregando contratos...
       </p>
-      <p id="geocode-progress" class="geocode-progress hidden"></p>
       <section id="lista-contratos" class="lista-contratos"></section>
       <div id="paginacao" class="paginacao hidden"></div>
     </main>
